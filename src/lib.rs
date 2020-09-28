@@ -118,7 +118,7 @@ impl RuntimeEnvironment {
         let i = p.0.get();
         let masked = i & types::MASK;
 
-        match masked.count_ones()
+        match masked.count_ones() {
             0 => self.text.deref(i, typ),
             1 => self.heap.deref(i - types::HEAP_OFFSET, typ),
             2 => self.stack.deref(i & (!types::MASK), typ),
