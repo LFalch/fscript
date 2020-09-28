@@ -7,7 +7,7 @@ use std::{
 
 use super::types as t;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Unit,
     Bool,

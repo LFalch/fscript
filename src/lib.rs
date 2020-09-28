@@ -9,17 +9,17 @@ pub mod types {
     pub struct Pointer(pub(super) NonZeroUsize);
     pub const         MASK: usize = 0b1100_0000 << (64 - 8);
     pub const    TEXT_MASK: usize = 0b0000_0000 << (64 - 8);
-    pub const    HEAP_MASK: usize = 0b0100_0000 << (64 - 8);
+    pub const  HEAP_OFFSET: usize = 0b0100_0000 << (64 - 8);
     pub const STACK_OFFSET: usize = 0b1000_0000 << (64 - 8);
     pub const   STACK_MASK: usize = 0b1100_0000 << (64 - 8);
     impl Pointer {
         #[inline(always)]
         pub const fn text(i: usize) -> Self {
-            Pointer(unsafe{NonZeroUsize::new_unchecked((i & (!MASK)) | TEXT_MASK)})
+            Pointer(unsafe{NonZeroUsize::new_unchecked(i | TEXT_MASK)})
         }
         #[inline(always)]
         pub const fn heap(i: usize) -> Self {
-            Pointer(unsafe{NonZeroUsize::new_unchecked((i & (!MASK)) | HEAP_MASK)})
+            Pointer(unsafe{NonZeroUsize::new_unchecked(i | HEAP_MASK)})
         }
         #[inline(always)]
         pub const fn stack(i: usize) -> Self {
@@ -108,6 +108,7 @@ impl Clone for MemoryArea {
 #[derive(Debug, Clone)]
 struct RuntimeEnvironment {
     symbol_table: HashMap<(String, Type), Pointer>,
+    stack_pointer: Pointer,
     text: MemoryArea,
     heap: MemoryArea,
     stack: MemoryArea,
@@ -116,14 +117,12 @@ impl RuntimeEnvironment {
     pub fn deref(&mut self, p: Pointer, typ: &Type) -> Option<*mut u8> {
         let i = p.0.get();
         let masked = i & types::MASK;
-        let i = i & (!types::MASK);
 
-        if masked == types::STACK_MASK {
-            self.stack.deref(i, typ)
-        } else if masked == types::TEXT_MASK {
-            self.text.deref(i, typ)
-        } else {
-            self.heap.deref(i & (!types::STACK_OFFSET), typ)
+        match masked.count_ones()
+            0 => self.text.deref(i, typ),
+            1 => self.heap.deref(i - types::HEAP_OFFSET, typ),
+            2 => self.stack.deref(i & (!types::MASK), typ),
+            _ => unreachable!(),
         }
     }
 }
