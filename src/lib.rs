@@ -19,7 +19,7 @@ pub mod types {
         }
         #[inline(always)]
         pub const fn heap(i: usize) -> Self {
-            Pointer(unsafe{NonZeroUsize::new_unchecked(i | HEAP_MASK)})
+            Pointer(unsafe{NonZeroUsize::new_unchecked(i | HEAP_OFFSET)})
         }
         #[inline(always)]
         pub const fn stack(i: usize) -> Self {
