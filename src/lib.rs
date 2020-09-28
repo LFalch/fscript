@@ -15,11 +15,11 @@ pub mod types {
     impl Pointer {
         #[inline(always)]
         pub const fn text(i: usize) -> Self {
-            Pointer(unsafe{NonZeroUsize::new_unchecked((i & (!MASK)) | TEXT_OFFSET)})
+            Pointer(unsafe{NonZeroUsize::new_unchecked((i & (!MASK)) | TEXT_MASK)})
         }
         #[inline(always)]
         pub const fn heap(i: usize) -> Self {
-            Pointer(unsafe{NonZeroUsize::new_unchecked((i & (!MASK)) | HEAP_OFFSET)})
+            Pointer(unsafe{NonZeroUsize::new_unchecked((i & (!MASK)) | HEAP_MASK)})
         }
         #[inline(always)]
         pub const fn stack(i: usize) -> Self {
