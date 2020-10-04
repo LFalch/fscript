@@ -22,7 +22,7 @@ pub mod types {
     pub const   STACK_MASK: usize = 0b1100_0000 << (64 - 8);
     impl Pointer {
         #[inline(always)]
-        pub const fn text(i: usize) -> Self {
+        pub fn text(i: usize) -> Self {
             debug_assert_ne!(i, 0);
             Pointer(unsafe{NonZeroUsize::new_unchecked(i | TEXT_MASK)})
         }

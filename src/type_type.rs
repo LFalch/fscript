@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
     fmt::{self, Display},
 };
+use byteorder::{ByteOrder, LittleEndian};
 
 use super::types as t;
 
@@ -158,6 +159,178 @@ impl Display for Type {
             Reference(ref t) => write!(f, "&{}", t),
             Function(ref args, ref ret) => {
                 write!(f, "fn{}->{}", TupleType(args), ret)
+            }
+        }
+    }
+}
+
+pub trait FType {
+    #[inline(always)]
+    fn static_type() -> Option<Type> {
+        None
+    }
+    fn get_type(&self) -> Type {
+        Self::static_type().expect("no type impl")
+    }
+    fn as_bytes(&self) -> Vec<u8>;
+}
+
+impl FType for t::Unit {
+    #[inline(always)]
+    fn static_type() -> Option<Type> {
+        Some(Type::Unit)
+    }
+    #[inline]
+    fn get_type(&self) -> Type {
+        Type::Unit
+    }
+    #[inline]
+    fn as_bytes(&self) -> Vec<u8> {
+        Vec::new()
+    }
+}
+
+impl FType for t::Bool {
+    #[inline(always)]
+    fn static_type() -> Option<Type> {
+        Some(Type::Bool)
+    }
+    #[inline]
+    fn get_type(&self) -> Type {
+        Type::Bool
+    }
+    #[inline]
+    fn as_bytes(&self) -> Vec<u8> {
+        vec![*self as u8]
+    }
+}
+
+impl FType for t::Uint {
+    #[inline(always)]
+    fn static_type() -> Option<Type> {
+        Some(Type::Uint)
+    }
+    #[inline]
+    fn get_type(&self) -> Type {
+        Type::Uint
+    }
+    #[inline]
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut v = vec![0; size_of::<t::Uint>()];
+        LittleEndian::write_u64(&mut v, *self);
+        v
+    }
+}
+
+impl FType for t::Int {
+    #[inline(always)]
+    fn static_type() -> Option<Type> {
+        Some(Type::Int)
+    }
+    #[inline]
+    fn get_type(&self) -> Type {
+        Type::Int
+    }
+    #[inline]
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut v = vec![0; size_of::<t::Int>()];
+        LittleEndian::write_i64(&mut v, *self);
+        v
+    }
+}
+
+impl FType for t::Float {
+    #[inline(always)]
+    fn static_type() -> Option<Type> {
+        Some(Type::Float)
+    }
+    #[inline]
+    fn get_type(&self) -> Type {
+        Type::Float
+    }
+    #[inline]
+    fn as_bytes(&self) -> Vec<u8> {
+        let mut v = vec![0; size_of::<t::Float>()];
+        LittleEndian::write_u64(&mut v, self.to_bits());
+        v
+    }
+}
+
+impl<T: FType> FType for Vec<T> {
+    #[inline]
+    fn get_type(&self) -> Type {
+        Type::Array(
+            Box::new(T::static_type().expect("requires inner type to be static")),
+            self.len()
+        )
+    }
+    #[inline]
+    fn as_bytes(&self) -> Vec<u8> {
+        self.iter()
+            .flat_map(|t| t.as_bytes())
+            .collect()
+    }
+}
+
+macro_rules! impl_for_tuple {
+    ($($t1:ident, $($tn:ident),*;)+) => {
+        $(
+        impl<$t1: FType $(, $tn: FType)*> FType for ($t1, $($tn),*) {
+            #[inline]
+            fn static_type() -> Option<Type> {
+                Some(Type::Tuple(vec![$t1::static_type()? $(, $tn::static_type()?)*]))
+            }
+            fn get_type(&self) -> Type {
+                #[allow(non_snake_case)]
+                let ($t1, $($tn),*) = self;
+                Type::Tuple(vec![$t1.get_type() $(, $tn.get_type())*])
+            }
+            fn as_bytes(&self) -> Vec<u8> {
+                #[allow(non_snake_case)]
+                let ($t1, $($tn),*) = self;
+                $t1.as_bytes().into_iter()
+                    $( .chain($tn.as_bytes().into_iter()) )*
+                    .collect()
+            }
+        }
+        )*
+    };
+}
+
+impl_for_tuple!{
+    T1,;
+    T1, T2;
+    T1, T2, T3;
+    T1, T2, T3, T4;
+    T1, T2, T3, T4, T5;
+    T1, T2, T3, T4, T5, T6;
+    T1, T2, T3, T4, T5, T6, T7;
+}
+
+impl FType for Option<t::Pointer> {
+    fn as_bytes(&self) -> Vec<u8> {
+        let p = self.map(t::Uint::from).unwrap_or(0);
+        p.as_bytes()
+    }
+}
+
+impl<T: FType> FType for Option<T> {
+    fn static_type() -> Option<Type> {
+        Some(Type::Option(Box::new(T::static_type()?)))
+    }
+    fn get_type(&self) -> Type {
+        match self {
+            Some(t) => Type::Option(Box::new(t.get_type())),
+            None => Self::static_type().unwrap()
+        }
+    }
+    fn as_bytes(&self) -> Vec<u8> {
+        match self {
+            None => vec![false as u8; size_of::<t::Bool>() + T::static_type().unwrap().size()],
+            Some(i) => {
+                let mut v = vec![true as u8];
+                v.append(&mut i.as_bytes());
+                v
             }
         }
     }
