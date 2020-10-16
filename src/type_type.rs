@@ -153,7 +153,7 @@ impl Display for Type {
             Uint => "uint".fmt(f),
             Int => "int".fmt(f),
             Float => "float".fmt(f),
-            Array(ref t, n) => write!(f, "[{},{}]", t, n),
+            Array(ref t, n) => write!(f, "[{};{}]", t, n),
             Tuple(ref ts) => write!(f, "{}", TupleType(ts)),
             Option(ref t) => write!(f, "?{}", t),
             Reference(ref t) => write!(f, "&{}", t),
