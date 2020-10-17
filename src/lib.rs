@@ -53,6 +53,9 @@ mod type_type;
 pub use type_type::*;
 use types::Pointer;
 pub mod ins;
+pub mod tokeniser;
+pub mod chars;
+pub mod compile;
 
 use std::{
     alloc::{alloc, dealloc, realloc, Layout},

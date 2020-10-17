@@ -124,9 +124,8 @@ impl<T: Read> InstructionCoder<T> {
                 self.0.read_exact(&mut length)?;
                 let length = LittleEndian::read_u64(&length) as usize;
 
-                let mut v = Vec::with_capacity(length);
-                v.resize(length, 0);
-                
+                let mut v = vec![0; length];
+
                 self.0.read_exact(&mut *v)?;
 
                 Ok(Instruction::PushLiteral(v))

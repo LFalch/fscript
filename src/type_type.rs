@@ -44,10 +44,7 @@ impl Type {
     }
     #[inline(always)]
     pub fn is_reference(&self) -> bool {
-        match *self {
-            Type::Reference(_) => true,
-            _ => false,
-        }
+        matches!(*self, Type::Reference(_))
     }
 }
 
@@ -77,7 +74,7 @@ impl FromStr for Type {
                     return Err(TypeParserError::ArrayNoEndBracket)
                 }
                 let sep = s.find(';').ok_or(TypeParserError::MissingSemicolonInArray)?;
-                Type::Array(Box::new(Self::from_str(&s[1..sep])?), s[sep+1..s.len()-1].parse().map_err(|e| TypeParserError::UnparseableSize(e))?)
+                Type::Array(Box::new(Self::from_str(&s[1..sep])?), s[sep+1..s.len()-1].parse().map_err(TypeParserError::UnparseableSize)?)
             }
             _ if s.starts_with('(') => {
                 if !s.ends_with(')') {
