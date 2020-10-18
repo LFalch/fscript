@@ -1,3 +1,5 @@
+#![feature(min_const_generics, is_sorted, or_patterns)]
+
 use std::num::NonZeroUsize;
 use std::io::{Read, Error as IoError};
 
@@ -56,6 +58,7 @@ pub mod ins;
 pub mod tokeniser;
 pub mod chars;
 pub mod compile;
+pub mod stack_table;
 
 use std::{
     alloc::{alloc, dealloc, realloc, Layout},
@@ -140,6 +143,7 @@ struct RuntimeEnvironment {
     heap: MemoryArea,
     stack: MemoryArea,
 }
+// TODO make this able to run code
 impl RuntimeEnvironment {
     pub fn next_ins(&mut self) -> ins::Instruction {
         ins::InstructionCoder(self).read_ins().unwrap()

@@ -3,14 +3,16 @@ use std::fs::File;
 
 use fscript::{
     Type,
-    compile::compile,
+    compile::{compile, SyntaxOp},
 };
 
 fn main() {
     for f in std::env::args().skip(1) {
+        println!("{}:", f);
         let f = File::open(f).unwrap();
 
-        compile(f).unwrap();
+        compile(f);
+        println!();
     }
 
     let mut s = String::with_capacity(32);

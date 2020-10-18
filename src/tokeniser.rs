@@ -69,6 +69,7 @@ impl<I: Iterator<Item=Result<char, E>>, E, F: FnMut(&str) -> bool> Tokeniser<I, 
     }
 }
 
+#[macro_export]
 macro_rules! try_iter {
     ($e:expr) => (
         match $e {
