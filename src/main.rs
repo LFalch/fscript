@@ -3,15 +3,16 @@ use std::fs::File;
 
 use fscript::{
     Type,
-    compile::{compile, SyntaxOp},
+    compile::{test, compile},
 };
 
 fn main() {
     for f in std::env::args().skip(1) {
         println!("{}:", f);
-        let f = File::open(f).unwrap();
+        test(File::open(&f).unwrap());
 
-        compile(f);
+        let f = File::open(f).unwrap();
+        println!("{:#?}", compile(f));
         println!();
     }
 

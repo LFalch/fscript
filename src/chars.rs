@@ -11,7 +11,8 @@ impl<T: Read> CharsExt for T {
 
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
 pub struct Chars<R> {
     inner: R,
 }

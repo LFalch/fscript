@@ -1,5 +1,7 @@
 use std::iter::Peekable;
 
+use crate::compile::is_op;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Class {
     Identifier,
@@ -45,27 +47,26 @@ impl Class {
     }
 }
 
-#[derive(Debug)]
-pub struct Tokeniser<I: Iterator<Item=Result<char, E>>, E, F: FnMut(&str) -> bool> {
+#[derive(Debug, Clone)]
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+pub struct Tokeniser<I: Iterator<Item=Result<char, E>>, E> {
     iter: Peekable<I>,
     cur_token: Class,
     buf: String,
-    is_op: F,
 }
 
-impl<I: Iterator<Item=Result<char, E>>, E, F: FnMut(&str) -> bool> Tokeniser<I, E, F> {
+impl<I: Iterator<Item=Result<char, E>>, E> Tokeniser<I, E> {
     #[inline]
-    pub fn new(iter: Peekable<I>, is_op: F) -> Self {
+    pub fn new(iter: Peekable<I>) -> Self {
         Self {
             iter,
-            is_op,
             cur_token: Class::Whitespace,
             buf: String::new(),
         }
     }
     #[inline]
-    pub fn from_char_iter(chars: I, is_op: F) -> Self {
-        Self::new(chars.peekable(), is_op)
+    pub fn from_char_iter(chars: I) -> Self {
+        Self::new(chars.peekable())
     }
 }
 
@@ -92,11 +93,11 @@ fn escape_char(c: char) -> char {
     }
 }
 
-impl<I: Iterator<Item=Result<char, E>>, E, F: FnMut(&str) -> bool> Iterator for Tokeniser<I, E, F> {
+impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
     type Item = Result<(String, Class), E>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let &mut Self{ref mut iter, ref mut cur_token, ref mut buf, ref mut is_op} = self;
+        let &mut Self{ref mut iter, ref mut cur_token, ref mut buf} = self;
 
         let token = *cur_token;
 
