@@ -5,12 +5,11 @@ use std::{
 
 use lazy_static::lazy_static;
 
-#[macro_use]
 use crate::stack_table;
 use crate::{
     chars::{Chars, CharsError, CharsExt},
     stack_table::StackTable,
-    tokeniser::{Class, Tokeniser},
+    tokeniser::{Class, Tokeniser, Token, FileLocation},
     Type
 };
 
@@ -203,7 +202,7 @@ impl Display for TokenStreamElement {
         match self {
             Identifier(s, None) => write!(f, "{}", s),
             Keyword(s) => write!(f, "{}", s.to_str()),
-            Identifier(s, Some((p, OperandMode::Infix))) => write!(f, ". {}({})$", s, p),
+            Identifier(s, Some((p, OperandMode::Infix))) => write!(f, ".{}({})$", s, p),
             Identifier(s, Some((p, OperandMode::Prefix))) => write!(f, "{}({})$", s, p),
             SyntaxOp(so) => write!(f, "{}", so.to_str()),
             NumberLiteral(s) => write!(f, "{}", s),
@@ -216,17 +215,18 @@ impl Display for TokenStreamElement {
 #[must_use = "iterators are lazy and do nothing unless consumed"]
 struct TokenStream<R: Read> {
     tokeniser: Tokeniser<Chars<R>, CharsError>,
-    peeked: Option<TokenStreamElement>,
+    peeked: Option<(FileLocation, TokenStreamElement)>,
     last_token_kind: LastTokenKind,
 }
 
 impl<R: Read> TokenStream<R> {
-    fn peek(&mut self) -> Option<Result<&TokenStreamElement, CompileError>> {
+    #[must_use = "This will be just like calling `next` in case there is an error"]
+    fn peek(&mut self) -> Option<Result<&TokenStreamElement, Error>> {
         match self {
             TokenStream {
                 peeked: Some(tse),
                 ..
-            } => Some(Ok(tse)),
+            } => Some(Ok(&tse.1)),
             TokenStream {
                 tokeniser,
                 peeked: peeked @ None,
@@ -234,7 +234,7 @@ impl<R: Read> TokenStream<R> {
             } => match Self::pure_next(tokeniser, last_token_kind) {
                 Some(Ok(tse)) => {
                     *peeked = Some(tse);
-                    Some(Ok(&peeked.as_ref().unwrap()))
+                    Some(Ok(&peeked.as_ref().unwrap().1))
                 }
                 Some(Err(e)) => Some(Err(e)),
                 None => None,
@@ -245,12 +245,12 @@ impl<R: Read> TokenStream<R> {
         loop {
             let token = tokeniser.next()?;
     
-            let (s, class) = match token {
+            let Token{buf: s, class, file_loc} = match token {
                 Ok(o) => o,
-                Err(e) => break Some(Err(CompileError::Chars(e))),
+                Err((file_loc, e)) => break Some(Err(Error::new(file_loc, ErrorKind::Chars(e)))),
             };
-    
-            break Some(Ok(match class {
+
+            break Some(Ok((file_loc, match class {
                 Class::Identifier => {
                     if let Some(kw) = Keyword::from_str(&s) {
                         *last_token_kind = LastTokenKind::OperatorLike(OperandMode::Prefix);
@@ -286,10 +286,10 @@ impl<R: Read> TokenStream<R> {
                             *last_token_kind = LastTokenKind::Bracket;
                             TokenStreamElement::SyntaxOp(syntax_op)
                         }
-                        (ltk, so, bo, uo) => return Some(Err(CompileError::UnexpectedOperator(ltk, so, bo, uo))),
+                        (ltk, so, bo, uo) => return Some(Err(Error::new(file_loc, ErrorKind::UnexpectedOperator(ltk, so, bo, uo)))),
                     }
                 }
-                Class::UnrecognisedOperator => return Some(Err(CompileError::UnrecognisedOperator(s))),
+                Class::UnrecognisedOperator => return Some(Err(Error::new(file_loc, ErrorKind::UnrecognisedOperator(s)))),
                 Class::Number => {
                     *last_token_kind = LastTokenKind::Value;
                     TokenStreamElement::NumberLiteral(s)
@@ -299,13 +299,13 @@ impl<R: Read> TokenStream<R> {
                     TokenStreamElement::StringLiteral(s)
                 }
                 Class::LineComment | Class::Whitespace => continue,
-            }));
+            })));
         }
     }
 }
 
 impl<R: Read> Iterator for TokenStream<R> {
-    type Item = Result<TokenStreamElement, CompileError>;
+    type Item = Result<(FileLocation, TokenStreamElement), Error>;
     fn next(&mut self) -> Option<Self::Item> {
         match self.peeked.take() {
             Some(tse) => Some(Ok(tse)),
@@ -332,7 +332,7 @@ pub enum Expr {
     Some(Box<Expr>),
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
-    Call(String, Box<Expr>),
+    Call(String, Vec<Expr>),
     Ref(Box<Expr>),
     Deref(Box<Expr>),
     Member(Box<Expr>, String),
@@ -350,10 +350,10 @@ pub enum Statement {
 }
 
 mod error;
-pub use self::error::CompileError;
+pub use self::error::{Error, ErrorKind};
 use self::error::FlattenToResult;
 
-fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, CompileError> {
+fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
     let mut statements = Vec::new();
 
     // TODO Make this actually parse the stream into a tree
@@ -361,7 +361,7 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, CompileError>
     loop {
         use self::SyntaxOp::*;
         use TokenStreamElement::*;
-        let tse = match ts.next() {
+        let (file_loc, tse) = match ts.next() {
             Some(tse) => tse?,
             None => break,
         };
@@ -371,16 +371,16 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, CompileError>
                 match ts.peek().flatten()? {
                     SyntaxOp(Equal) => {ts.next(); Statement::Assignment(ident, None, parse_expr(&mut None, &mut ts, false)?)},
                     SyntaxOp(End) => Statement::DiscardExpr(Expr::Identifer(ident)),
-                    _ => Statement::DiscardExpr(parse_expr(&mut Some(Identifier(ident, None)), &mut ts, false)?),
+                    _ => Statement::DiscardExpr(parse_expr(&mut Some((file_loc, Identifier(ident, None))), &mut ts, false)?),
                 }
             }
-            SyntaxOp(End) => return Err(CompileError::EmptyStatement),
-            _ => return Err(CompileError::UnexpectedToken),
+            SyntaxOp(End) => return Err(Error::new(file_loc, ErrorKind::EmptyStatement)),
+            pre => Statement::DiscardExpr(parse_expr(&mut Some((file_loc, pre)), &mut ts, false)?),
         });
 
         match ts.next().flatten() {
-            Ok(SyntaxOp(End)) => (),
-            Ok(_) => return Err(CompileError::MissingSemicolon),
+            Ok((_, SyntaxOp(End))) => (),
+            Ok((file_loc, _)) => return Err(Error::new(file_loc, ErrorKind::MissingSemicolon)),
             Err(e) => return Err(e),
         }
     }
@@ -388,20 +388,21 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, CompileError>
     Ok(statements)
 }
 
-fn parse_expr<R: Read>(pre: &mut Option<TokenStreamElement>, ts: &mut TokenStream<R>, high_precedence: bool) -> Result<Expr, CompileError> {
+fn parse_expr<R: Read>(pre: &mut Option<(FileLocation, TokenStreamElement)>, ts: &mut TokenStream<R>, high_precedence: bool) -> Result<Expr, Error> {
     struct State<'a, R: Read> {
-        pre: &'a mut Option<TokenStreamElement>,
+        pre: &'a mut Option<(FileLocation, TokenStreamElement)>,
         ts: &'a mut TokenStream<R>
     }
     impl<R: Read> State<'_, R> {
-        fn next(&mut self) -> Option<Result<TokenStreamElement, CompileError>>{
+        fn next(&mut self) -> Option<Result<(FileLocation, TokenStreamElement), Error>>{
             self.pre.take().map(Ok).or_else(|| self.ts.next())
         }
-        fn peek(&mut self) -> Option<Result<&TokenStreamElement, CompileError>> {
+        #[must_use = "This will be just like calling `next` in case there is an error"]
+        fn peek(&mut self) -> Option<Result<&TokenStreamElement, Error>> {
             let State {
                 pre, ts
             } = self;
-            pre.as_ref().map(Ok).or_else(move || ts.peek())
+            pre.as_ref().map(|(_, tse)| Ok(tse)).or_else(move || ts.peek())
         }
     }
     
@@ -410,10 +411,10 @@ fn parse_expr<R: Read>(pre: &mut Option<TokenStreamElement>, ts: &mut TokenStrea
 
         use self::SyntaxOp::*;
         use TokenStreamElement::*;
-        let tse = s.next().flatten()?;
+        let (file_loc, tse) = s.next().flatten()?;
 
-        let expr = match tse {
-            SyntaxOp(End) => Err(CompileError::ExpectedToken),
+        let mut expr = match tse {
+            SyntaxOp(End) => Err(Error::new(file_loc, ErrorKind::ExpectedToken)),
             // variable
             Identifier(ident, None) => {
                 match s.peek().flatten()? {
@@ -423,21 +424,20 @@ fn parse_expr<R: Read>(pre: &mut Option<TokenStreamElement>, ts: &mut TokenStrea
                     _ => Ok(Expr::Identifer(ident)),
                 }
             }
-            // TODO fix; is wrong
-            Identifier(ident, Some((_pred, OperandMode::Prefix))) => Ok(Expr::Call(ident, Box::new(parse_expr(&mut s.pre, &mut s.ts, true)?))),
-            Identifier(_ident, Some((_, OperandMode::Infix))) => Err(CompileError::UnexpectedToken),
+            Identifier(ident, Some((_pred, OperandMode::Prefix))) => Ok(Expr::Call(ident, vec![parse_expr(&mut s.pre, &mut s.ts, true)?])),
+            Identifier(_ident, Some((_, OperandMode::Infix))) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             NumberLiteral(n) => {
                 match (n.parse::<u64>(), n.parse::<i64>(), n.parse::<f64>()) {
                     (Ok(u), Ok(_), _) => Ok(Expr::Literal(Literal::AmbigInt(u))),
                     (Ok(u), Err(_), _) => Ok(Expr::Literal(Literal::Uint(u))),
                     (Err(_), Ok(i), _) => Ok(Expr::Literal(Literal::Int(i))),
                     (_, _, Ok(f)) => Ok(Expr::Literal(Literal::Float(f))),
-                    (Err(_), Err(_), Err(_)) => Err(CompileError::MalformedNumber),
+                    (Err(_), Err(_), Err(_)) => Err(Error::new(file_loc, ErrorKind::MalformedNumber)),
                 }
             }
             StringLiteral(s) => Ok(Expr::Literal(Literal::String(s))),
-            SyntaxOp(Equal | Member | WithType | Comma | EndParen | EndBlock | EndIndex) => Err(CompileError::UnexpectedToken),
-            SyntaxOp(EndType | StartType) => Err(CompileError::UnexpectedToken),
+            SyntaxOp(Equal | Member | WithType | Comma | EndParen | EndBlock | EndIndex) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
+            SyntaxOp(EndType | StartType) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(StartIndex) => todo!(),
             SyntaxOp(StartParen) => todo!(),
             SyntaxOp(StartBlock) => todo!(),
@@ -447,15 +447,53 @@ fn parse_expr<R: Read>(pre: &mut Option<TokenStreamElement>, ts: &mut TokenStrea
             Keyword(_) => todo!(),
         };
 
-        match s.peek().flatten()? {
-            Identifier(ident, Some((pred, OperandMode::Infix))) if !high_precedence => todo!("{} {}", ident, pred),
-            _ => expr,
-        }
+        let mut prefix_stack = Vec::new();
+
+        loop { match (high_precedence, s.peek().flatten()?) {
+            (false, Identifier(_, Some((_, OperandMode::Infix)))) => {
+                let (_file_loc, next) = s.next().flatten()?;
+                match next {
+                    Identifier(ident, Some((pred, OperandMode::Infix))) => {
+                        prefix_stack.push((pred, ident, parse_expr(&mut s.pre, &mut s.ts, true)?));
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            (_, SyntaxOp(Member)) => {
+                let _ = s.next();
+                let (file_loc, next) = s.next().flatten()?;
+                match next {
+                    // TODO Handle member function calling syntax
+                    Identifier(s, None) | NumberLiteral(s) => {
+                        expr = Ok(Expr::Member(Box::new(expr?), s));
+                    }
+                    _ => break Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
+                }
+            }
+            _ => break Ok(prefix_stack_unroll(expr?, prefix_stack)),
+        } }
     };
 
     debug_assert!(pre.is_none());
 
     res
+}
+
+fn prefix_stack_unroll(main_expr: Expr, mut prefix_stack: Vec<(u8, String, Expr)>) -> Expr {
+    if prefix_stack.is_empty() {
+        main_expr
+    } else {
+        let (split_i, _) = prefix_stack
+            .iter()
+            .map(|&(n, _, _)| n)
+            .enumerate()
+            .fold((0, u8::MAX), |(min_i, min_n), (i, n)| if n < min_n { (i, n) } else {(min_i, min_n)});
+    
+        let mut second_prefix_stack = prefix_stack.split_off(split_i);
+        let (_max_pred, func_ident, second_expr) = second_prefix_stack.remove(0);
+
+        Expr::Call(func_ident, vec![prefix_stack_unroll(main_expr, prefix_stack), prefix_stack_unroll(second_expr, second_prefix_stack)])
+    }
 }
 
 pub(crate) fn is_op(s: &str) -> bool {
@@ -474,13 +512,13 @@ fn token_stream<R: Read>(read: R) -> TokenStream<R> {
     }
 }
 
-pub fn compile<R: Read>(read: R) -> Result<Vec<Statement>, CompileError> {
+pub fn compile<R: Read>(read: R) -> Result<Vec<Statement>, Error> {
     tree(token_stream(read))
 }
 
 pub fn test<R: Read>(read: R) {
     for elem in token_stream(read) {
-        let elem = elem.unwrap();
+        let (_file_loc, elem) = elem.unwrap();
         print!("{}{}", elem, if elem.is_end() { "\n" } else { " " });
     }
 }

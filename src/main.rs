@@ -10,7 +10,7 @@ fn main() {
     for f in std::env::args().skip(1) {
         println!("{}:", f);
         test(File::open(&f).unwrap());
-
+        println!("");
         let f = File::open(f).unwrap();
         println!("{:#?}", compile(f));
         println!();

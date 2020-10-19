@@ -53,6 +53,7 @@ pub struct Tokeniser<I: Iterator<Item=Result<char, E>>, E> {
     iter: Peekable<I>,
     cur_token: Class,
     buf: String,
+    file_loc: FileLocation,
 }
 
 impl<I: Iterator<Item=Result<char, E>>, E> Tokeniser<I, E> {
@@ -62,6 +63,10 @@ impl<I: Iterator<Item=Result<char, E>>, E> Tokeniser<I, E> {
             iter,
             cur_token: Class::Whitespace,
             buf: String::new(),
+            file_loc: FileLocation {
+                column: 0,
+                line: 1,
+            }
         }
     }
     #[inline]
@@ -72,10 +77,10 @@ impl<I: Iterator<Item=Result<char, E>>, E> Tokeniser<I, E> {
 
 #[macro_export]
 macro_rules! try_iter {
-    ($e:expr) => (
+    ($e:expr, $file_loc:ident) => (
         match $e {
             Ok(s) => s,
-            Err(e) => return Some(Err(e))
+            Err(e) => return Some(Err((*$file_loc, e)))
         }
     );
 }
@@ -94,10 +99,10 @@ fn escape_char(c: char) -> char {
 }
 
 impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
-    type Item = Result<(String, Class), E>;
+    type Item = Result<Token, (FileLocation, E)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let &mut Self{ref mut iter, ref mut cur_token, ref mut buf} = self;
+        let &mut Self{ref mut iter, ref mut cur_token, ref mut buf, ref mut file_loc} = self;
 
         let token = *cur_token;
 
@@ -112,14 +117,14 @@ impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
                 if let Class::String = cur_token {
                     match peek_c {
                         '\\' => {
-                            let _a = try_iter!(iter.next().unwrap());
-                            let b = try_iter!(iter.next().unwrap());
+                            let _a = try_iter!(iter.next().unwrap(), file_loc);
+                            let b = try_iter!(iter.next().unwrap(), file_loc);
                             buf.push(escape_char(b));
                             continue
                         }
                         '"' => {
                             let was_empty = buf.is_empty();
-                            let quote = try_iter!(iter.next().unwrap());
+                            let quote = try_iter!(iter.next().unwrap(), file_loc);
                             debug_assert_eq!(quote, '"');
                             if was_empty {
                                 continue;
@@ -136,7 +141,7 @@ impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
                     break
                 }
 
-                buf.push(try_iter!(iter.next().unwrap()));
+                buf.push(try_iter!(iter.next().unwrap(), file_loc));
             }
         }
 
@@ -145,18 +150,27 @@ impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
                 let a = &buf[..i];
 
                 if is_op(a) {
-                    let ret = buf.drain(..i).collect();
+                    let ret: String = buf.drain(..i).collect();
                     if !buf.is_empty() {
                         *cur_token = Class::Operator;
                     }
-                    return Some(Ok((ret, token)));
+
+                    return Some(Ok(Token {
+                        file_loc: file_loc.advance(&ret),
+                        buf: ret,
+                        class: token,
+                    }));
                 }
             }
             if !buf.is_empty() {
                 let mut ret = String::new();
                 ret.push(buf.remove(0));
                 *cur_token = Class::Operator;
-                return Some(Ok((ret, Class::UnrecognisedOperator)));
+                return Some(Ok(Token {
+                    file_loc: file_loc.advance(&ret),
+                    buf: ret,
+                    class: Class::UnrecognisedOperator,
+                }));
             }
         }
 
@@ -166,7 +180,40 @@ impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
         if ret.is_empty() {
             self.next()
         } else {
-            Some(Ok((ret, token)))
+            Some(Ok(Token {
+                file_loc: file_loc.advance(&ret),
+                buf: ret,
+                class: token,
+            }))
         }
     }
 }
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub struct FileLocation {
+    line: u32,
+    column: u32,
+}
+
+impl FileLocation {
+    fn advance(&mut self, s: &str) -> FileLocation {
+        let loc = *self;
+        match s.rfind("\n") {
+            Some(i) => {
+                self.line += 1;
+                self.column = (s.len() - i) as u32;
+            }
+            None => {
+                self.column += s.len() as u32;
+            }
+        }
+        loc
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub buf: String,
+    pub class: Class,
+    pub file_loc: FileLocation,
+} 

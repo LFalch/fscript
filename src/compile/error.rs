@@ -1,9 +1,26 @@
 use crate::chars::CharsError;
+use crate::tokeniser::FileLocation;
 
 use super::{LastTokenKind, SyntaxOp};
 
 #[derive(Debug)]
-pub enum CompileError {
+pub struct Error {
+    file_loc: FileLocation,
+    kind: ErrorKind,
+}
+
+impl Error {
+    #[inline(always)]
+    pub(crate) fn new(file_loc: FileLocation, kind: ErrorKind) -> Error {
+        Error {
+            file_loc,
+            kind,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ErrorKind {
     ExpectedToken,
     UnexpectedToken,
     MissingSemicolon,
@@ -18,24 +35,33 @@ pub trait FlattenToResult<T, E> {
     fn flatten(self) -> Result<T, E>;
 }
 
-impl<T, E: Into<CompileError>> FlattenToResult<T, CompileError> for Option<Result<T, E>> {
-    fn flatten(self) -> Result<T, CompileError> {
+impl<T, E: Into<Error>> FlattenToResult<T, Error> for Option<Result<T, E>> {
+    fn flatten(self) -> Result<T, Error> {
         match self {
             Some(Ok(t)) => Ok(t),
             Some(Err(e)) => Err(e.into()),
-            None => Err(CompileError::ExpectedToken),
+            None => Err(Error {
+                file_loc: FileLocation::default(),
+                kind: ErrorKind::ExpectedToken
+            }),
         }
     }
 }
 
-impl From<CharsError> for CompileError {
-    fn from(c: CharsError) -> Self {
-        CompileError::Chars(c)
+impl From<(FileLocation, CharsError)> for Error {
+    fn from((file_loc, c): (FileLocation, CharsError)) -> Self {
+        Error {
+            file_loc,
+            kind: ErrorKind::Chars(c),
+        }
     }
 }
 
-impl From<std::io::Error> for CompileError {
-    fn from(e: std::io::Error) -> Self {
-        CompileError::Chars(CharsError::Other(e))
+impl From<(FileLocation, std::io::Error)> for Error {
+    fn from((file_loc, e): (FileLocation, std::io::Error)) -> Self {
+        Error {
+            file_loc,
+            kind: ErrorKind::Chars(CharsError::Other(e)),
+        }
     }
 }
