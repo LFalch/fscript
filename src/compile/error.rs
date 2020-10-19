@@ -21,6 +21,7 @@ impl Error {
 
 #[derive(Debug)]
 pub enum ErrorKind {
+    ExpectedExpression,
     ExpectedToken,
     UnexpectedToken,
     MissingSemicolon,
@@ -31,18 +32,22 @@ pub enum ErrorKind {
     Chars(CharsError),
 }
 
-pub trait FlattenToResult<T, E> {
-    fn flatten(self) -> Result<T, E>;
+pub trait FlattenToResult<T, E>: Sized {
+    #[inline(always)]
+    fn flatten(self, file_loc: FileLocation) -> Result<T, E> {
+        self.flatten_with(file_loc, ErrorKind::ExpectedToken)
+    }
+    fn flatten_with(self, file_loc: FileLocation, error: ErrorKind) -> Result<T, E>;
 }
 
 impl<T, E: Into<Error>> FlattenToResult<T, Error> for Option<Result<T, E>> {
-    fn flatten(self) -> Result<T, Error> {
+    fn flatten_with(self, file_loc: FileLocation, default_error: ErrorKind) -> Result<T, Error> {
         match self {
             Some(Ok(t)) => Ok(t),
             Some(Err(e)) => Err(e.into()),
             None => Err(Error {
-                file_loc: FileLocation::default(),
-                kind: ErrorKind::ExpectedToken
+                file_loc,
+                kind: default_error,
             }),
         }
     }

@@ -189,7 +189,7 @@ impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct FileLocation {
     line: u32,
     column: u32,

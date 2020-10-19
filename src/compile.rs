@@ -353,7 +353,14 @@ mod error;
 pub use self::error::{Error, ErrorKind};
 use self::error::FlattenToResult;
 
+#[inline(always)]
 fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
+    let ret = tree_mut(&mut ts);
+    debug_assert!(ts.peek().is_none());
+    ret
+}
+
+fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
     let mut statements = Vec::new();
 
     // TODO Make this actually parse the stream into a tree
@@ -368,17 +375,17 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
 
         statements.push(match tse {
             Identifier(ident, None) => {
-                match ts.peek().flatten()? {
-                    SyntaxOp(Equal) => {ts.next(); Statement::Assignment(ident, None, parse_expr(&mut None, &mut ts, false)?)},
+                match ts.peek().flatten(file_loc)? {
+                    SyntaxOp(Equal) => {ts.next(); Statement::Assignment(ident, None, parse_expr(file_loc, &mut None, ts, false)?)},
                     SyntaxOp(End) => Statement::DiscardExpr(Expr::Identifer(ident)),
-                    _ => Statement::DiscardExpr(parse_expr(&mut Some((file_loc, Identifier(ident, None))), &mut ts, false)?),
+                    _ => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, Identifier(ident, None))), ts, false)?),
                 }
             }
             SyntaxOp(End) => return Err(Error::new(file_loc, ErrorKind::EmptyStatement)),
-            pre => Statement::DiscardExpr(parse_expr(&mut Some((file_loc, pre)), &mut ts, false)?),
+            pre => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, pre)), ts, false)?),
         });
 
-        match ts.next().flatten() {
+        match ts.next().flatten(file_loc) {
             Ok((_, SyntaxOp(End))) => (),
             Ok((file_loc, _)) => return Err(Error::new(file_loc, ErrorKind::MissingSemicolon)),
             Err(e) => return Err(e),
@@ -388,7 +395,7 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
     Ok(statements)
 }
 
-fn parse_expr<R: Read>(pre: &mut Option<(FileLocation, TokenStreamElement)>, ts: &mut TokenStream<R>, high_precedence: bool) -> Result<Expr, Error> {
+fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, TokenStreamElement)>, ts: &mut TokenStream<R>, high_precedence: bool) -> Result<Expr, Error> {
     struct State<'a, R: Read> {
         pre: &'a mut Option<(FileLocation, TokenStreamElement)>,
         ts: &'a mut TokenStream<R>
@@ -411,20 +418,20 @@ fn parse_expr<R: Read>(pre: &mut Option<(FileLocation, TokenStreamElement)>, ts:
 
         use self::SyntaxOp::*;
         use TokenStreamElement::*;
-        let (file_loc, tse) = s.next().flatten()?;
+        let (file_loc, tse) = s.next().flatten_with(file_loc, ErrorKind::ExpectedExpression)?;
 
         let mut expr = match tse {
-            SyntaxOp(End) => Err(Error::new(file_loc, ErrorKind::ExpectedToken)),
+            SyntaxOp(End) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             // variable
             Identifier(ident, None) => {
-                match s.peek().flatten()? {
+                match s.peek().flatten(file_loc)? {
                     TokenStreamElement::SyntaxOp(StartParen) => {
                         todo!("function call of {}", ident)
                     }
                     _ => Ok(Expr::Identifer(ident)),
                 }
             }
-            Identifier(ident, Some((_pred, OperandMode::Prefix))) => Ok(Expr::Call(ident, vec![parse_expr(&mut s.pre, &mut s.ts, true)?])),
+            Identifier(ident, Some((_pred, OperandMode::Prefix))) => Ok(Expr::Call(ident, vec![parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?])),
             Identifier(_ident, Some((_, OperandMode::Infix))) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             NumberLiteral(n) => {
                 match (n.parse::<u64>(), n.parse::<i64>(), n.parse::<f64>()) {
@@ -441,27 +448,27 @@ fn parse_expr<R: Read>(pre: &mut Option<(FileLocation, TokenStreamElement)>, ts:
             SyntaxOp(StartIndex) => todo!(),
             SyntaxOp(StartParen) => todo!(),
             SyntaxOp(StartBlock) => todo!(),
-            SyntaxOp(Ref) => Ok(Expr::Ref(Box::new(parse_expr(&mut s.pre, &mut s.ts, true)?))),
-            SyntaxOp(Deref) => Ok(Expr::Deref(Box::new(parse_expr(&mut s.pre, &mut s.ts, true)?))),
-            SyntaxOp(Return) => Ok(Expr::Return(Box::new(parse_expr(&mut s.pre, &mut s.ts, false)?))),
+            SyntaxOp(Ref) => Ok(Expr::Ref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
+            SyntaxOp(Deref) => Ok(Expr::Deref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
+            SyntaxOp(Return) => Ok(Expr::Return(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, false)?))),
             Keyword(_) => todo!(),
         };
 
         let mut prefix_stack = Vec::new();
 
-        loop { match (high_precedence, s.peek().flatten()?) {
+        loop { match (high_precedence, s.peek().flatten(file_loc)?) {
             (false, Identifier(_, Some((_, OperandMode::Infix)))) => {
-                let (_file_loc, next) = s.next().flatten()?;
+                let (_file_loc, next) = s.next().flatten(file_loc)?;
                 match next {
                     Identifier(ident, Some((pred, OperandMode::Infix))) => {
-                        prefix_stack.push((pred, ident, parse_expr(&mut s.pre, &mut s.ts, true)?));
+                        prefix_stack.push((pred, ident, parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?));
                     }
                     _ => unreachable!(),
                 }
             }
             (_, SyntaxOp(Member)) => {
                 let _ = s.next();
-                let (file_loc, next) = s.next().flatten()?;
+                let (file_loc, next) = s.next().flatten(file_loc)?;
                 match next {
                     // TODO Handle member function calling syntax
                     Identifier(s, None) | NumberLiteral(s) => {
