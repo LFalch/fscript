@@ -34,6 +34,7 @@ pub enum SyntaxOp {
     Return,
     WithType,
     Comma,
+    Keyword(Keyword),
 }
 
 impl SyntaxOp {
@@ -56,7 +57,7 @@ impl SyntaxOp {
             "->" => SyntaxOp::Return,
             ":" => SyntaxOp::WithType,
             "," => SyntaxOp::Comma,
-            _ => return None,
+            _ => SyntaxOp::Keyword(Keyword::from_str(s)?),
         })
     }
     #[inline]
@@ -78,6 +79,7 @@ impl SyntaxOp {
             SyntaxOp::Return => "->",
             SyntaxOp::WithType => ":",
             SyntaxOp::Comma => ",",
+            SyntaxOp::Keyword(kw) => kw.to_str(),
         }
     }
     #[inline]
@@ -86,6 +88,7 @@ impl SyntaxOp {
     /// `None` if bracket, `Some(operand_mode)` if it works like a function call,
     /// where `operand_mode` is the approriate `OperandMode`
     fn operand_mode(&self) -> Option<OperandMode> {
+        use self::Keyword::*;
         use SyntaxOp::*;
         match self {
             Equal => Some(OperandMode::Infix),
@@ -96,6 +99,10 @@ impl SyntaxOp {
             WithType => Some(OperandMode::Infix),
             Comma => Some(OperandMode::Infix),
             End => None,
+            Keyword(Fn) => Some(OperandMode::Prefix),
+            Keyword(If) => Some(OperandMode::Prefix),
+            Keyword(Else) => Some(OperandMode::Prefix),
+            Keyword(Loop | While | For) => Some(OperandMode::Prefix),
             EndParen | StartIndex | EndIndex | StartType | EndType
                 | StartBlock | EndBlock | StartParen => None,
         }
@@ -145,7 +152,7 @@ pub enum OperandMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Keyword {
+pub enum Keyword {
     Fn,
     If,
     Else,
@@ -183,17 +190,9 @@ impl Keyword {
 #[derive(Debug, Clone)]
 enum TokenStreamElement {
     Identifier(String, Option<(u8, OperandMode)>),
-    Keyword(Keyword),
     SyntaxOp(SyntaxOp),
     NumberLiteral(String),
     StringLiteral(String),
-}
-
-impl TokenStreamElement {
-    #[inline]
-    pub fn is_end(&self) -> bool {
-        matches!(*self, TokenStreamElement::SyntaxOp(SyntaxOp::End))
-    }
 }
 
 impl Display for TokenStreamElement {
@@ -201,7 +200,6 @@ impl Display for TokenStreamElement {
         use TokenStreamElement::*;
         match self {
             Identifier(s, None) => write!(f, "{}", s),
-            Keyword(s) => write!(f, "{}", s.to_str()),
             Identifier(s, Some((p, OperandMode::Infix))) => write!(f, ".{}({})$", s, p),
             Identifier(s, Some((p, OperandMode::Prefix))) => write!(f, "{}({})$", s, p),
             SyntaxOp(so) => write!(f, "{}", so.to_str()),
@@ -254,7 +252,7 @@ impl<R: Read> TokenStream<R> {
                 Class::Identifier => {
                     if let Some(kw) = Keyword::from_str(&s) {
                         *last_token_kind = LastTokenKind::OperatorLike(OperandMode::Prefix);
-                        TokenStreamElement::Keyword(kw)
+                        TokenStreamElement::SyntaxOp(SyntaxOp::Keyword(kw))
                     } else {
                         *last_token_kind = LastTokenKind::Value;
                         TokenStreamElement::Identifier(s, None)
@@ -322,6 +320,7 @@ pub enum Literal {
     Uint(u64),
     Float(f64),
     Bool(bool),
+    Unit,
     None
 }
 
@@ -337,9 +336,8 @@ pub enum Expr {
     Deref(Box<Expr>),
     Member(Box<Expr>, String),
     Index(Box<Expr>, Box<Expr>),
-    Block(Vec<Statement>, Box<Expr>),
+    Block(Vec<Statement>),
     Function(Vec<String>, Box<Expr>),
-    Return(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]
@@ -347,6 +345,7 @@ pub enum Statement {
     // includes functions, which will just have fancy sugar
     Assignment(String, Option<Type>, Expr),
     DiscardExpr(Expr),
+    Return(Expr),
 }
 
 mod error;
@@ -362,8 +361,6 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
 
 fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
     let mut statements = Vec::new();
-
-    // TODO Make this actually parse the stream into a tree
 
     loop {
         use self::SyntaxOp::*;
@@ -381,6 +378,7 @@ fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
                     _ => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, Identifier(ident, None))), ts, false)?),
                 }
             }
+            SyntaxOp(Return) => Statement::Return(parse_expr(file_loc, &mut None, ts, false)?),
             SyntaxOp(End) => return Err(Error::new(file_loc, ErrorKind::EmptyStatement)),
             pre => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, pre)), ts, false)?),
         });
@@ -450,8 +448,8 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
             SyntaxOp(StartBlock) => todo!(),
             SyntaxOp(Ref) => Ok(Expr::Ref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
             SyntaxOp(Deref) => Ok(Expr::Deref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
-            SyntaxOp(Return) => Ok(Expr::Return(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, false)?))),
-            Keyword(_) => todo!(),
+            SyntaxOp(Return) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
+            SyntaxOp(Keyword(_)) => todo!(),
         };
 
         let mut prefix_stack = Vec::new();
@@ -523,9 +521,134 @@ pub fn compile<R: Read>(read: R) -> Result<Vec<Statement>, Error> {
     tree(token_stream(read))
 }
 
-pub fn test<R: Read>(read: R) {
-    for elem in token_stream(read) {
-        let (_file_loc, elem) = elem.unwrap();
-        print!("{}{}", elem, if elem.is_end() { "\n" } else { " " });
+fn statements_print(statements: impl IntoIterator<Item=Statement>, identation: usize) {
+    let ident = "    ".repeat(identation);
+    for statement in statements {
+        let expr = match statement {
+            Statement::Assignment(s, None, expr) => {
+                print!("{}{} = ", ident, s);
+                expr
+            }
+            Statement::Assignment(s, Some(typ), expr) => {
+                print!("{}{}: {} = ", ident, s, typ);
+                expr
+            }
+            Statement::DiscardExpr(expr) => {
+                print!("{}", ident);
+                expr
+            }
+            Statement::Return(expr) => {
+                print!("-> ");
+                expr
+            }
+        };
+
+        print_expr(expr, identation);
+        println!(";");
     }
+}
+
+fn print_expr(expr: Expr, identation: usize) {
+    match expr {
+        Expr::Block(stmts) => {
+            println!("{{");
+            statements_print(stmts, identation + 1);
+            println!("}}");
+        }
+        Expr::Array(elems) => {
+            print!("[");
+            let mut first = true;
+            for elem in elems {
+                if !first {
+                    print!(", ");
+                } else {
+                    first = false;
+                }
+                print_expr(elem, identation);
+            }
+            print!("]");
+        }
+        Expr::Call(name, args) => {
+            print!("{}(", name);
+            let mut first = true;
+            for arg in args {
+                if !first {
+                    print!(", ");
+                } else {
+                    first = false;
+                }
+                print_expr(arg, identation);
+            }
+            print!(")");
+        }
+        Expr::Deref(box expr) => {
+            print!("*");
+            print_expr(expr, identation);
+        }
+        Expr::Ref(box expr) => {
+            print!("&");
+            print_expr(expr, identation);
+        }
+        Expr::Function(args, box expr) => {
+            print!("fn(");
+            let mut first = true;
+            for arg in args {
+                if !first {
+                    print!(", ");
+                } else {
+                    first = false;
+                }
+                print!("{}", arg);
+            }
+            print!(") ");
+            print_expr(expr, identation);
+        }
+        Expr::Identifer(ident) => {
+            print!("{}", ident);
+        }
+        Expr::Index(box a, box b) => {
+            print_expr(a, identation);
+            print!("[");
+            print_expr(b, identation);
+            print!("]");
+        }
+        Expr::Literal(lit) => {
+            match lit {
+                Literal::AmbigInt(n) => print!("{}", n),
+                Literal::Int(n) => print!("{}", n),
+                Literal::Uint(n) => print!("{}", n),
+                Literal::Float(n) => print!("{}", n),
+                Literal::Bool(b) => print!("{}", b),
+                Literal::None => print!("None"),
+                Literal::Unit => print!("()"),
+                Literal::String(s) => print!("{:?}", s),
+            }
+        }
+        Expr::Some(box s) => {
+            print!("Some(");
+            print_expr(s, identation);
+            print!(")");
+        }
+        Expr::Tuple(elems) => {
+            print!("(");
+            let mut first = true;
+            for elem in elems {
+                if !first {
+                    print!(", ");
+                } else {
+                    first = false;
+                }
+                print_expr(elem, identation);
+            }
+            print!(")");
+        }
+        Expr::Member(box expr, member) => {
+            print_expr(expr, identation);
+            print!(".{}", member);
+        }
+    }
+}
+
+pub fn test<R: Read>(read: R) {
+    statements_print(compile(read).unwrap(), 0);
 }
