@@ -7,10 +7,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08c48aae112d48ed9f069b33538ea9e3e90aa263cfa3d1c24309612b1f7472de"
 
 [[package]]
+name = "collect_result"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8d08e26327531306d48a1e28d8e0e3ea604f3dd72988821498e0b81da72427a"
+
+[[package]]
 name = "fscript"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "collect_result",
  "lazy_static",
 ]
 

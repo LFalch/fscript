@@ -25,6 +25,7 @@ pub enum ErrorKind {
     ExpectedToken,
     UnexpectedToken,
     MissingSemicolon,
+    MissingEndParen,
     EmptyStatement,
     MalformedNumber,
     UnrecognisedOperator(String),
