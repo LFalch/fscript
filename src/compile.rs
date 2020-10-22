@@ -388,8 +388,9 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    // includes functions, which will just have fancy sugar
-    Assignment(String, Option<Type>, Expr),
+    VarAssign(String, Option<Type>, Expr),
+    ConstAssign(String, Option<Type>, Expr),
+    Reassign(String, Expr),
     DiscardExpr(Expr),
     Return(Expr),
 }
@@ -412,6 +413,7 @@ fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
     let mut statements = Vec::new();
 
     loop {
+        use self::Keyword::*;
         use self::SyntaxOp::*;
         use TokenStreamElement::*;
         let (file_loc, tse) = match ts.next() {
@@ -424,9 +426,38 @@ fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
         }
 
         statements.push(match tse {
+            SyntaxOp(Keyword(Let)) => {
+                if let (file_loc, Identifier(ident, None)) = ts.next().flatten(file_loc)? {
+                    if let (file_loc, SyntaxOp(Equal)) = ts.next().flatten(file_loc)? {
+                        Statement::ConstAssign(ident, None, parse_expr(file_loc, &mut None, ts, false)?)
+                    } else {
+                        return Err(Error::new(file_loc, ErrorKind::ExpectedToken))
+                    }
+                } else {
+                    return Err(Error::new(file_loc, ErrorKind::ExpectedToken))
+                }
+            }
+            SyntaxOp(Keyword(Var)) => {
+                if let (file_loc, Identifier(ident, None)) = ts.next().flatten(file_loc)? {
+                    if let (file_loc, SyntaxOp(Equal)) = ts.next().flatten(file_loc)? {
+                        Statement::VarAssign(ident, None, parse_expr(file_loc, &mut None, ts, false)?)
+                    } else {
+                        return Err(Error::new(file_loc, ErrorKind::ExpectedToken))
+                    }
+                } else {
+                    return Err(Error::new(file_loc, ErrorKind::ExpectedToken))
+                }
+            }
+            SyntaxOp(Keyword(Fn)) => {
+                if let (file_loc, Identifier(ident, None)) = ts.next().flatten(file_loc)? {
+                    Statement::ConstAssign(ident, None, parse_expr(file_loc, &mut Some((file_loc, SyntaxOp(Keyword(Fn)))), ts, false)?)
+                } else {
+                    return Err(Error::new(file_loc, ErrorKind::ExpectedToken))
+                }
+            }
             Identifier(ident, None) => {
                 match ts.peek().flatten(file_loc)? {
-                    SyntaxOp(Equal) => {ts.next(); Statement::Assignment(ident, None, parse_expr(file_loc, &mut None, ts, false)?)},
+                    SyntaxOp(Equal) => {ts.next(); Statement::Reassign(ident, parse_expr(file_loc, &mut None, ts, false)?)},
                     SyntaxOp(End) => Statement::DiscardExpr(Expr::Identifer(ident)),
                     _ => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, Identifier(ident, None))), ts, false)?),
                 }
@@ -435,7 +466,6 @@ fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
             SyntaxOp(End) => return Err(Error::new(file_loc, ErrorKind::EmptyStatement)),
             pre => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, pre)), ts, false)?),
         });
-        dbg!(statements.last());
 
         match ts.next().flatten(file_loc) {
             Ok((_, SyntaxOp(End))) => (),

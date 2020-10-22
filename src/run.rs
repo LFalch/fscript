@@ -47,11 +47,67 @@ pub enum Value {
     Function(Function),
 }
 
-pub type Enviroment = HashMap<String, Value>;
+type SVEnv = HashMap<String, Value>;
+
+pub struct Enviroment<'a> {
+    parent_const_envs: Vec<&'a SVEnv>,
+    const_env: SVEnv,
+    var_env: SVEnv,
+}
+
+impl Enviroment<'_> {
+    #[inline(always)]
+    fn new_standard() -> Self {
+        Enviroment {
+            parent_const_envs: vec![],
+            const_env: standard_env(),
+            var_env: SVEnv::new(),
+        }
+    }
+    fn get(&self, s: &str) -> Option<&Value> {
+        let ret = self.var_env
+            .get(s)
+            .or_else(|| self.const_env.get(s));
+
+        if let Some(ret) = ret {
+            Some(ret)
+        } else {
+            for env in self.parent_const_envs.iter().rev() {
+                if let Some(r) = env.get(s) {
+                    return Some(r);
+                }
+            }
+            None
+        }
+    }
+    fn get_mut(&mut self, s: &str) -> Option<&mut Value> {
+        self.var_env.get_mut(s)
+    }
+    fn add_const(&mut self, s: impl ToString, v: Value) {
+        let s = s.to_string();
+        self.var_env.remove(&s);
+        self.const_env.insert(s, v);
+    }
+    fn add_var(&mut self, s: impl ToString, v: Value) {
+        let s = s.to_string();
+        self.const_env.remove(&s);
+        self.var_env.insert(s, v);
+    }
+    fn scope<'a>(&'a self, vars: impl IntoIterator<Item=(String, Value)>) -> Enviroment<'a> {
+        let mut parent_const_envs = Vec::with_capacity(self.parent_const_envs.len() + 1);
+        parent_const_envs.extend(self.parent_const_envs.iter().copied());
+        parent_const_envs.push(&self.const_env);
+        Enviroment {
+            parent_const_envs,
+            const_env: SVEnv::new(),
+            var_env: vars.into_iter().collect(),
+        }
+    }
+}
 
 mod fns;
 
-fn standard_enviroment() -> Enviroment {
+fn standard_env() -> SVEnv {
     use crate::run::fns::*;
 
     let mut env = HashMap::new();
@@ -83,29 +139,41 @@ fn standard_enviroment() -> Enviroment {
     env.insert("concat".to_owned(), c(concat));
     env.insert("pow".to_owned(), c(pow));
     env.insert("print".to_owned(), c(print));
-    env.insert("write".to_owned(), c(write));
+    env.insert("println".to_owned(), c(println));
     env.insert("show".to_owned(), c(show));
 
     env
 } 
 
 pub fn run(iter: impl IntoIterator<Item=Statement>) -> Value {
-    let mut env = standard_enviroment();
+    let ref mut env = Enviroment::new_standard();
 
-    run_statements(iter, &mut env)
+    run_statements(iter, env)
 }
 
-fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment) -> Value {
+fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<'_>) -> Value {
     for statement in iter {
         match statement {
             Statement::DiscardExpr(expr) => match eval(expr, env) {
                 Value::Literal(Unit) => (),
                 other => eprintln!("warning: unused value {:?}", other),
             }
-            Statement::Assignment(ident, _, expr) => {
+            Statement::ConstAssign(ident, None, expr) => {
                 let val = eval(expr, env);
-                env.insert(ident, val);
+                env.add_const(ident, val);
             }
+            Statement::VarAssign(ident, None, expr) => {
+                let val = eval(expr, env);
+                env.add_var(ident, val);
+            }
+            Statement::Reassign(ident, expr) => {
+                let val = eval(expr, env);
+                match env.get_mut(&ident) {
+                    Some(var) => *var = val,
+                    None => panic!("no such variable in scope: {}", ident)
+                }
+            }
+            Statement::ConstAssign(_, Some(_), _) | Statement::VarAssign(_, Some(_), _) => unimplemented!(),
             Statement::Return(expr) => return eval(expr, env),
         }
     }
@@ -113,7 +181,7 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment)
     Value::Literal(Unit)
 }
 
-fn eval(expr: Expr, env: &mut HashMap<String, Value>) -> Value {
+fn eval(expr: Expr, env: &Enviroment<'_>) -> Value {
     match expr {
         Expr::Identifer(ident) => if let Some(val) = env.get(&ident) {
             val.clone()
@@ -135,13 +203,12 @@ fn eval(expr: Expr, env: &mut HashMap<String, Value>) -> Value {
 
             match f {
                 Function::Implemented(arg_names, body) => {
-                    let mut env: HashMap<_, _> = arg_names
+                    let ref mut env = env.scope(arg_names
                         .iter()
                         .map(|s| s.clone())
-                        .zip(exprs)
-                        .collect();
+                        .zip(exprs));
 
-                    run_statements(body.clone(), &mut env)
+                    run_statements(body.clone(), env)
                 }
                 Function::Builtin(f) => f(exprs.collect(), &*env),
             }
@@ -197,7 +264,8 @@ fn eval(expr: Expr, env: &mut HashMap<String, Value>) -> Value {
                 _ => panic!("Invalid index"),
             }
         }
-        Expr::Block(statements) => run_statements(statements, env),
+        // TODO should be able to access outer scope
+        Expr::Block(statements) => run_statements(statements, &mut env.scope(None)),
         Expr::Function(arg_names, box body) => {
             Value::Function(Function::Implemented(arg_names, match body {
                 Expr::Block(statements) => statements,

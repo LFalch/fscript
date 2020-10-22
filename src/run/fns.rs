@@ -1,30 +1,5 @@
 use std::ops::{Add, Mul, Div, Rem, Shl, Shr, BitAnd, BitOr, BitXor};
 
-/*
-    "+" => "add"
-    "-" => "sub"
-    "*" => "mul"
-    "/" => "div"
-    "%" => "rem"
-    "++" => "concat"
-    "**" => "pow"
-    "==" => "eq"
-    "!=" => "neq"
-    ">" => "gt"
-    ">=" => "gte"
-    "<" => "lt"
-    "<=" => "lte"
-    "&&" => "and"
-    "||" => "or"
-    "<<" => "shl"
-    ">>" => "shr"
-    "&" => "bitand"
-    "^" => "xor"
-    "|" => "bitor"
-    "-" => "neg"
-    "!" => "not"
-*/
-
 use super::{Value, Enviroment};
 use crate::compile::Literal::{String as LString, AmbigInt, Bool, Int, Uint, Float, Unit, None as LNone};
 
@@ -51,6 +26,7 @@ macro_rules! bin_op {
             args!($name, args; a, b);
             match (a, b) {
                 (Value::Literal(Int(a)), Value::Literal(Int(b))) => Value::Literal(Int($op(a, b))),
+                (Value::Literal(AmbigInt(a)), Value::Literal(AmbigInt(b))) => Value::Literal(AmbigInt($op(a, b))),
                 (Value::Literal(AmbigInt(a)), Value::Literal(Int(b))) => Value::Literal(Int($op(a as i64, b))),
                 (Value::Literal(Int(a)), Value::Literal(AmbigInt(b))) => Value::Literal(Int($op(a, b as i64))),
                 (Value::Literal(Uint(a) | AmbigInt(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Uint($op(a, b))),
@@ -128,8 +104,9 @@ pub fn neg(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(neg, args; arg);
     match arg {
         Value::Literal(Int(a)) => Value::Literal(Int(-a)),
+        Value::Literal(AmbigInt(a)) => Value::Literal(Int(-(a as i64))),
         Value::Literal(Float(a)) => Value::Literal(Float(-a)),
-        _ => panic!("mismatched types"),
+        _ => panic!("mismatched types {:?}", arg),
     }
 }
 
@@ -166,12 +143,12 @@ pub fn pow(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     }
 }
 
-pub fn print(args: Vec<Value>, env: &Enviroment) -> Value {
-    write(args, env);
+pub fn println(args: Vec<Value>, env: &Enviroment) -> Value {
+    print(args, env);
     println!();
     Value::Literal(Unit)
 }
-pub fn write(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub fn print(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(write, args; arg);
 
     match arg {
