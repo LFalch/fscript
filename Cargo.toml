@@ -10,3 +10,6 @@ edition = "2018"
 byteorder = "1"
 lazy_static = "1"
 collect_result = "0.1"
+
+[features]
+debug_print_statements = []

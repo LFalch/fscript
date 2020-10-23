@@ -158,9 +158,9 @@ pub fn print(mut args: Vec<Value>, _env: &Enviroment) -> Value {
 
     Value::Literal(Unit)
 }
-fn show_inner(arg: Value) -> String {
+fn show_inner(arg: &Value, env: &Enviroment) -> String {
     match arg {
-        Value::Literal(LString(s)) => s,
+        Value::Literal(LString(s)) => s.clone(),
         Value::Literal(Int(i)) => format!("{}", i),
         Value::Literal(Uint(i)) => format!("{}", i),
         Value::Literal(AmbigInt(i)) => format!("{}", i),
@@ -168,13 +168,18 @@ fn show_inner(arg: Value) -> String {
         Value::Literal(Bool(b)) => format!("{}", b),
         Value::Literal(Unit) => "()".to_owned(),
         Value::Literal(LNone) => "None".to_owned(),
-        Value::Some(box val) => format!("Some({})", show_inner(val)),
+        Value::Some(box val) => format!("Some({})", show_inner(val, env)),
         Value::Tuple(vs) => format!("{:?}", vs),
         Value::Array(vs) => format!("{:?}", vs),
         Value::Function(f) => format!("{:?}", f),
+        Value::Ref(n) => format!("&#{}", n),
+        Value::MutRef(n) => format!("@#{}", n),
     }
 }
-pub fn show(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub fn show(mut args: Vec<Value>, env: &Enviroment) -> Value {
     args!(show, args; arg);
-    Value::Literal(LString(show_inner(arg)))
+    Value::Literal(LString(match arg {
+        Value::Ref(n) => show_inner(env.index(n), env),
+        _ => panic!("arg needs to be a reference"),
+    }))
 }

@@ -21,6 +21,7 @@ type OpFuncTableWithPrecedence<const N: usize> = StackTable<&'static str, (&'sta
 pub enum SyntaxOp {
     Equal,
     Ref,
+    MutRef,
     Deref,
     Member,
     End,
@@ -44,6 +45,7 @@ impl SyntaxOp {
         Some(match s {
             "=" => SyntaxOp::Equal,
             "&" => SyntaxOp::Ref,
+            "@" => SyntaxOp::MutRef,
             "*" => SyntaxOp::Deref,
             "." => SyntaxOp::Member,
             ";" => SyntaxOp::End,
@@ -66,6 +68,7 @@ impl SyntaxOp {
         match self {
             SyntaxOp::Equal => "=",
             SyntaxOp::Ref => "&",
+            SyntaxOp::MutRef => "@",
             SyntaxOp::Deref => "*",
             SyntaxOp::Member => ".",
             SyntaxOp::End => ";",
@@ -93,7 +96,7 @@ impl SyntaxOp {
         use SyntaxOp::*;
         match self {
             Equal => Some(OperandMode::Infix),
-            Ref => Some(OperandMode::Prefix),
+            Ref | MutRef => Some(OperandMode::Prefix),
             Deref => Some(OperandMode::Prefix),
             Member => Some(OperandMode::Infix),
             Return => Some(OperandMode::Prefix),
@@ -114,7 +117,7 @@ impl SyntaxOp {
         use SyntaxOp::*;
         match self {
             Equal => LastTokenKind::OperatorLike(OperandMode::Infix),
-            Ref => LastTokenKind::OperatorLike(OperandMode::Prefix),
+            Ref | MutRef => LastTokenKind::OperatorLike(OperandMode::Prefix),
             Deref => LastTokenKind::OperatorLike(OperandMode::Prefix),
             Member => LastTokenKind::OperatorLike(OperandMode::Infix),
             Return => LastTokenKind::OperatorLike(OperandMode::Prefix),
@@ -379,6 +382,7 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     Call(String, Vec<Expr>),
     Ref(Box<Expr>),
+    MutRef(Box<Expr>),
     Deref(Box<Expr>),
     Member(Box<Expr>, String),
     Index(Box<Expr>, Box<Expr>),
@@ -455,6 +459,8 @@ fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
                     return Err(Error::new(file_loc, ErrorKind::ExpectedToken))
                 }
             }
+            // rn we only allow an lvalue to an identifier
+            // this should probably just be any expression at all
             Identifier(ident, None) => {
                 match ts.peek().flatten(file_loc)? {
                     SyntaxOp(Equal) => {ts.next(); Statement::Reassign(ident, parse_expr(file_loc, &mut None, ts, false)?)},
@@ -558,6 +564,7 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
             }
             SyntaxOp(StartBlock) => tree_mut(&mut s.ts).map(Expr::Block),
             SyntaxOp(Ref) => Ok(Expr::Ref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
+            SyntaxOp(MutRef) => Ok(Expr::MutRef(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
             SyntaxOp(Deref) => Ok(Expr::Deref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
             SyntaxOp(Return) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(Keyword(Fn)) => {

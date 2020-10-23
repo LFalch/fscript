@@ -45,110 +45,168 @@ pub enum Value {
     Tuple(Vec<Value>),
     Array(Vec<Value>),
     Function(Function),
+    Ref(usize),
+    MutRef(usize),
 }
 
-type SVEnv = HashMap<String, Value>;
+type SVEnv = HashMap<String, usize>;
 
 pub struct Enviroment<'a> {
-    parent_const_envs: Vec<&'a SVEnv>,
+    stack: &'a mut Vec<Value>,
+    parent_length: usize,
+    parent_const_envs: Box<[&'a SVEnv]>,
     const_env: SVEnv,
     var_env: SVEnv,
 }
 
-impl Enviroment<'_> {
-    #[inline(always)]
-    fn new_standard() -> Self {
-        Enviroment {
-            parent_const_envs: vec![],
-            const_env: standard_env(),
-            var_env: SVEnv::new(),
-        }
-    }
-    fn get(&self, s: &str) -> Option<&Value> {
-        let ret = self.var_env
-            .get(s)
-            .or_else(|| self.const_env.get(s));
-
-        if let Some(ret) = ret {
-            Some(ret)
-        } else {
-            for env in self.parent_const_envs.iter().rev() {
-                if let Some(r) = env.get(s) {
-                    return Some(r);
-                }
-            }
-            None
-        }
-    }
-    fn get_mut(&mut self, s: &str) -> Option<&mut Value> {
-        self.var_env.get_mut(s)
-    }
-    fn add_const(&mut self, s: impl ToString, v: Value) {
-        let s = s.to_string();
-        self.var_env.remove(&s);
-        self.const_env.insert(s, v);
-    }
-    fn add_var(&mut self, s: impl ToString, v: Value) {
-        let s = s.to_string();
-        self.const_env.remove(&s);
-        self.var_env.insert(s, v);
-    }
-    fn scope<'a>(&'a self, vars: impl IntoIterator<Item=(String, Value)>) -> Enviroment<'a> {
-        let mut parent_const_envs = Vec::with_capacity(self.parent_const_envs.len() + 1);
-        parent_const_envs.extend(self.parent_const_envs.iter().copied());
-        parent_const_envs.push(&self.const_env);
-        Enviroment {
-            parent_const_envs,
-            const_env: SVEnv::new(),
-            var_env: vars.into_iter().collect(),
-        }
+impl Drop for Enviroment<'_> {
+    #[inline]
+    fn drop(&mut self) {
+        self.stack.drain(self.parent_length..);
     }
 }
 
 mod fns;
 
-fn standard_env() -> SVEnv {
-    use crate::run::fns::*;
+impl<'s> Enviroment<'s> {
+    #[inline(always)]
+    /// Stack will be cleared
+    fn new_standard(stack: &'s mut Vec<Value>) -> Self {
+        use crate::run::fns::*;
+        stack.clear();
 
-    let mut env = HashMap::new();
+        let mut env = Enviroment {
+            stack: stack,
+            parent_length: 0,
+            parent_const_envs: Box::new([]),
+            const_env: SVEnv::new(),
+            var_env: SVEnv::new(),
+        };
+        #[inline]
+        fn c(f: fn(Vec<Value>, &Enviroment) -> Value) -> Value {
+            Value::Function(Function::Builtin(f))
+        }
 
-    #[inline]
-    fn c(f: fn(Vec<Value>, &Enviroment) -> Value) -> Value {
-        Value::Function(Function::Builtin(f))
+        env.add_const("id", c(id));
+        env.add_const("add", c(add));
+        env.add_const("sub", c(sub));
+        env.add_const("mul", c(mul));
+        env.add_const("div", c(div));
+        env.add_const("rem", c(rem));
+        env.add_const("shl", c(shl));
+        env.add_const("shr", c(shr));
+        env.add_const("bitand", c(bitand));
+        env.add_const("xor", c(xor));
+        env.add_const("bitor", c(bitor));
+        env.add_const("eq", c(eq));
+        env.add_const("neq", c(neq));
+        env.add_const("gt", c(gt));
+        env.add_const("gte", c(gte));
+        env.add_const("lt", c(lt));
+        env.add_const("lte", c(lte));
+        env.add_const("neg", c(neg));
+        env.add_const("not", c(not));
+        env.add_const("concat", c(concat));
+        env.add_const("pow", c(pow));
+        env.add_const("print", c(print));
+        env.add_const("println", c(println));
+        env.add_const("show", c(show));
+
+        env
     }
+    fn index(&self, i: usize) -> &Value {
+        &self.stack[i]
+    }
+    fn index_mut(&mut self, i: usize) -> &mut Value {
+        &mut self.stack[i]
+    }
+    fn get_index(&self, s: &str) -> Option<usize> {
+        let ret = self.var_env
+            .get(s)
+            .or_else(|| self.const_env.get(s));
 
-    env.insert("id".to_owned(), c(id));
-    env.insert("add".to_owned(), c(add));
-    env.insert("sub".to_owned(), c(sub));
-    env.insert("mul".to_owned(), c(mul));
-    env.insert("div".to_owned(), c(div));
-    env.insert("rem".to_owned(), c(rem));
-    env.insert("shl".to_owned(), c(shl));
-    env.insert("shr".to_owned(), c(shr));
-    env.insert("bitand".to_owned(), c(bitand));
-    env.insert("xor".to_owned(), c(xor));
-    env.insert("bitor".to_owned(), c(bitor));
-    env.insert("eq".to_owned(), c(eq));
-    env.insert("neq".to_owned(), c(neq));
-    env.insert("gt".to_owned(), c(gt));
-    env.insert("gte".to_owned(), c(gte));
-    env.insert("lt".to_owned(), c(lt));
-    env.insert("lte".to_owned(), c(lte));
-    env.insert("neg".to_owned(), c(neg));
-    env.insert("not".to_owned(), c(not));
-    env.insert("concat".to_owned(), c(concat));
-    env.insert("pow".to_owned(), c(pow));
-    env.insert("print".to_owned(), c(print));
-    env.insert("println".to_owned(), c(println));
-    env.insert("show".to_owned(), c(show));
+        if let Some(ret) = ret {
+            Some(*ret)
+        } else {
+            let mut ret = None;
+            for env in self.parent_const_envs.iter().rev() {
+                if let Some(r) = env.get(s) {
+                    ret = Some(*r);
+                    break;
+                }
+            }
+            ret
+        }
+    }
+    #[inline]
+    fn get(&self, s: &str) -> Option<&Value> {
+        if let Some(index) = self.get_index(s) {
+            Some(&self.stack[index])
+        } else {
+            None
+        }
+    }
+    #[inline]
+    fn get_mut_index(&self, s: &str) -> Option<usize> {
+        self.var_env.get(s).copied()
+    }
+    fn get_mut(&mut self, s: &str) -> Option<&mut Value> {
+        if let Some(i) = self.get_mut_index(s) {
+            Some(self.index_mut(i))
+        } else {
+            None
+        }
+    }
+    fn add(&mut self, v: Value) -> usize {
+        let i = self.stack.len();
+        match &v {
+            Value::Ref(r) | Value::MutRef(r) if r >= &i => panic!("Dangling reference"),
+            _ => ()
+        }
+        self.stack.push(v);
+        i
+    }
+    fn add_const(&mut self, s: impl ToString, v: Value) {
+        let s = s.to_string();
+        self.var_env.remove(&s);
+        let i = self.add(v);
+        self.const_env.insert(s, i);
+    }
+    fn add_var(&mut self, s: impl ToString, v: Value) {
+        let s = s.to_string();
+        self.const_env.remove(&s);
+        let i = self.add(v);
+        self.var_env.insert(s, i);
+    }
+    fn scope<'a>(&'a mut self, vars: impl IntoIterator<Item=(String, Value)>) -> Enviroment<'a> {
+        let parent_const_envs = self.parent_const_envs.iter().copied().chain(Some(&self.const_env)).collect();
 
-    env
-} 
+        Enviroment {
+            parent_length: self.stack.len(),
+            var_env: {
+                let vars = vars.into_iter(); 
+                let mut var_env = SVEnv::with_capacity(vars.size_hint().0);
+                for (var, val) in vars {
+                    var_env.insert(var, self.stack.len());
+                    self.stack.push(val);
+                }
+                var_env
+            },
+            stack: self.stack,
+            parent_const_envs,
+            const_env: SVEnv::new(),
+        }
+    }
+}
 
 pub fn run(iter: impl IntoIterator<Item=Statement>) -> Value {
-    let ref mut env = Enviroment::new_standard();
+    let mut stack = Vec::new();
+    let mut env = Enviroment::new_standard(&mut stack);
 
-    run_statements(iter, env)
+    #[cfg(feature = "debug_print_statements")]
+    let iter = iter.into_iter().inspect(|statement| println!("{:?}", statement));
+
+    run_statements(iter, &mut env)
 }
 
 fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<'_>) -> Value {
@@ -181,7 +239,7 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
     Value::Literal(Unit)
 }
 
-fn eval(expr: Expr, env: &Enviroment<'_>) -> Value {
+fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
     match expr {
         Expr::Identifer(ident) => if let Some(val) = env.get(&ident) {
             val.clone()
@@ -199,7 +257,7 @@ fn eval(expr: Expr, env: &Enviroment<'_>) -> Value {
                 None => panic!("no such function {}", func),
             };
 
-            let exprs = arg_exprs.into_iter().map(|expr| eval(expr, env));
+            let exprs: Vec<_> = arg_exprs.into_iter().map(|expr| eval(expr, env)).collect();
 
             match f {
                 Function::Implemented(arg_names, body) => {
@@ -210,11 +268,31 @@ fn eval(expr: Expr, env: &Enviroment<'_>) -> Value {
 
                     run_statements(body.clone(), env)
                 }
-                Function::Builtin(f) => f(exprs.collect(), &*env),
+                Function::Builtin(f) => f(exprs, &*env),
             }
         }
-        Expr::Ref(_) => todo!(),
-        Expr::Deref(_) => todo!(),
+        Expr::Ref(box expr) => match expr {
+            Expr::Identifer(s) => Value::Ref(env.get_index(&s).expect("no value bound to name")),
+            expr => {
+                let val = eval(expr, env);
+                Value::Ref(env.add(val))
+            }
+        },
+        Expr::MutRef(box expr) => match expr {
+            Expr::Identifer(s) => Value::MutRef(env.get_mut_index(&s).expect("no such variable")),
+            expr => {
+                let val = eval(expr, env);
+                Value::MutRef(env.add(val))
+            }
+        },
+        Expr::Deref(box expr) => {
+            match eval(expr, env) {
+                Value::Some(box val) => val,
+                Value::Literal(LNone) => panic!("Value was None :("),
+                Value::Ref(n) | Value::MutRef(n) => env.index(0).clone(),
+                v => panic!("Cannot deref value: {:?}", v)
+            }
+        }
         Expr::Member(box expr, ident) => {
             match (eval(expr, env), &*ident) {
                 (Value::Array(v), "len") => Value::Literal(Uint(v.len() as u64)),
