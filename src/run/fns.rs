@@ -168,7 +168,7 @@ fn show_inner(arg: &Value, env: &Enviroment) -> String {
         Value::Literal(Bool(b)) => format!("{}", b),
         Value::Literal(Unit) => "()".to_owned(),
         Value::Literal(LNone) => "None".to_owned(),
-        Value::Some(box val) => format!("Some({})", show_inner(val, env)),
+        Value::Some(val) => format!("Some({})", show_inner(&*val, env)),
         Value::Tuple(vs) => format!("{:?}", vs),
         Value::Array(vs) => format!("{:?}", vs),
         Value::Function(f) => format!("{:?}", f),

@@ -46,6 +46,23 @@ macro_rules! stack_table {
     };
 }
 
+#[cfg(test)]
+fn is_sorted<I: Ord>(mut i: impl Iterator<Item = I>) -> bool {
+    let mut last = if let Some(f) = i.next() {
+        f
+    } else {
+        return true
+    };
+
+    for next in i {
+        if last > next {
+            return false;
+        }
+        last = next;
+    }
+    true
+}
+
 #[test]
 fn test_stack_table() {
     let map = stack_table!{
@@ -53,5 +70,5 @@ fn test_stack_table() {
         "hest" => 2,
         "lort" => 1,
     };
-    assert!(map.inner.is_sorted_by_key(|&(k, _)| k));
+    assert!(is_sorted(map.inner.iter().map(|&(k, _)| k)));
 }

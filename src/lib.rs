@@ -1,5 +1,3 @@
-#![feature(min_const_generics, is_sorted, or_patterns, box_patterns)]
-
 use std::num::NonZeroUsize;
 use std::io::{Read, Error as IoError};
 

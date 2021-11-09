@@ -247,7 +247,10 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
             panic!("no such variable {}", ident);
         }
         Expr::Literal(lit) => Value::Literal(lit),
-        Expr::Some(box expr) => Value::Some(Box::new(eval(expr, env))),
+        Expr::Some(expr) => {
+            let expr = *expr;
+            Value::Some(Box::new(eval(expr, env)))
+        }
         Expr::Array(vec) => Value::Array(vec.into_iter().map(|expr| eval(expr, env)).collect()),
         Expr::Tuple(vec) => Value::Tuple(vec.into_iter().map(|expr| eval(expr, env)).collect()),
         Expr::Call(func, arg_exprs) => {
@@ -271,30 +274,30 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
                 Function::Builtin(f) => f(exprs, &*env),
             }
         }
-        Expr::Ref(box expr) => match expr {
+        Expr::Ref(expr) => match *expr {
             Expr::Identifer(s) => Value::Ref(env.get_index(&s).expect("no value bound to name")),
             expr => {
                 let val = eval(expr, env);
                 Value::Ref(env.add(val))
             }
         },
-        Expr::MutRef(box expr) => match expr {
+        Expr::MutRef(expr) => match *expr {
             Expr::Identifer(s) => Value::MutRef(env.get_mut_index(&s).expect("no such variable")),
             expr => {
                 let val = eval(expr, env);
                 Value::MutRef(env.add(val))
             }
         },
-        Expr::Deref(box expr) => {
-            match eval(expr, env) {
-                Value::Some(box val) => val,
+        Expr::Deref(expr) => {
+            match eval(*expr, env) {
+                Value::Some(val) => *val,
                 Value::Literal(LNone) => panic!("Value was None :("),
                 Value::Ref(n) | Value::MutRef(n) => env.index(0).clone(),
                 v => panic!("Cannot deref value: {:?}", v)
             }
         }
-        Expr::Member(box expr, ident) => {
-            match (eval(expr, env), &*ident) {
+        Expr::Member(expr, ident) => {
+            match (eval(*expr, env), &*ident) {
                 (Value::Array(v), "len") => Value::Literal(Uint(v.len() as u64)),
                 (Value::Literal(LString(s)), "len") => Value::Literal(Uint(s.len() as u64)),
                 (Value::Tuple(v), s) => if let Ok(n) = s.parse() {
@@ -309,8 +312,8 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
                 _ => panic!("No such member {} on that type", ident),
             }
         }
-        Expr::Index(box indexable, box index) => {
-            let index = match eval(index, env) {
+        Expr::Index(indexable, index) => {
+            let index = match eval(*index, env) {
                 Value::Literal(Uint(i) | AmbigInt(i)) => Ok(i as usize),
                 Value::Tuple(mut tu) => {
                     if tu.len() == 2 {
@@ -328,7 +331,7 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
                 }
                 _ => panic!("only a uint or tuple can be an index"),
             };
-            match (eval(indexable, env), index) {
+            match (eval(*indexable, env), index) {
                 (Value::Array(mut v), Ok(i)) => v.swap_remove(i),
                 (Value::Array(mut v), Err((i, j))) => {
                     v.drain(j..);
@@ -344,8 +347,8 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
         }
         // TODO should be able to access outer scope
         Expr::Block(statements) => run_statements(statements, &mut env.scope(None)),
-        Expr::Function(arg_names, box body) => {
-            Value::Function(Function::Implemented(arg_names, match body {
+        Expr::Function(arg_names, body) => {
+            Value::Function(Function::Implemented(arg_names, match *body {
                 Expr::Block(statements) => statements,
                 expr => vec![Statement::Return(expr)],
             }))
