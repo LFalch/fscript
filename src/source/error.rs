@@ -1,9 +1,9 @@
 use std::fmt::{self, Display};
 
-use super::super::chars::CharsError;
-use super::super::tokeniser::FileLocation;
+use super::chars::CharsError;
+use super::tokeniser::FileLocation;
 
-use super::{LastTokenKind, SyntaxOp};
+use super::token_stream::{LastTokenKind, SyntaxOp};
 
 #[derive(Debug)]
 pub struct Error {

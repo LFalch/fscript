@@ -4,12 +4,17 @@ use std::io::Read;
 
 pub mod chars;
 pub mod tokeniser;
+pub mod token_stream;
 pub mod parser;
 pub mod ast;
 
+pub mod error;
+
 use self::chars::CharsExt;
 use self::tokeniser::Tokeniser;
+use self::token_stream::TokenStream;
 use self::parser::*;
+use self::error::Error;
 
 /// Parses the content of a reader into an abstract syntax tree representation of a program
 pub fn parse_source<R: Read>(read: R) -> Result<ast::Program, Error> {
