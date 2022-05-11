@@ -9,8 +9,9 @@ use collect_result::CollectResult;
 
 use crate::source::ast::{
     Statement,
+    Statements,
     Expr,
-    Primitive::{self, String as LString, AmbigInt, Uint, Unit, None as LNone}
+    Primitive::{self, String as LString, AmbigInt, Uint, Unit, None as LNone},
 };
 use crate::source::tokeniser::FileLocation;
 
@@ -21,7 +22,7 @@ pub enum Function {
     /// Used for built-in functions.
     Builtin(fn(Vec<Value>, &Enviroment) -> Value),
     /// A function that is defined in fscript
-    Implemented(Vec<String>, Vec<Statement>),
+    Implemented(Vec<String>, Statements),
 }
 
 impl PartialEq<Self> for Function {

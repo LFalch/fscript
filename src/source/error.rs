@@ -46,7 +46,7 @@ impl Display for ErrorKind {
         match self {
             ErrorKind::ExpectedExpression => write!(f, "expected expression"),
             ErrorKind::ExpectedToken => write!(f, "expected token"),
-            ErrorKind::UnexpectedToken => write!(f, "unexpected oken"),
+            ErrorKind::UnexpectedToken => write!(f, "unexpected token"),
             ErrorKind::MissingSemicolon => write!(f, "missing semicolon"),
             ErrorKind::MissingEndParen => write!(f, "missing end parenthesis"),
             ErrorKind::EmptyStatement => write!(f, "empty statement"),

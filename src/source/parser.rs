@@ -50,7 +50,7 @@ lazy_static! {
 
 #[inline(always)]
 /// 
-pub(super) fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Program, Error> {
+pub(super) fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Statements, Error> {
     let ret = tree_mut(&mut ts)?;
     match ts.next() {
         Some(Ok((file_loc,_ ))) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
@@ -59,7 +59,7 @@ pub(super) fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Program, Error> {
     }
 }
 
-fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Program, Error> {
+fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Statements, Error> {
     let mut statements = Vec::new();
 
     loop {

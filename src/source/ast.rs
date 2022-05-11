@@ -1,7 +1,7 @@
 use crate::types::Type;
 use super::tokeniser::FileLocation;
 
-pub type Program = Vec<Statement>;
+pub type Statements = Vec<Statement>;
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -16,7 +16,7 @@ pub enum Expr {
     Deref(FileLocation, Box<Expr>),
     Member(FileLocation, Box<Expr>, String),
     Index(FileLocation, Box<Expr>, Box<Expr>),
-    Block(FileLocation, Vec<Statement>),
+    Block(FileLocation, Statements),
     Function(FileLocation, Vec<String>, Box<Expr>),
 }
 

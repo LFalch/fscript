@@ -64,7 +64,7 @@ impl<I: Iterator<Item=Result<char, E>>, E> Tokeniser<I, E> {
             cur_token: Class::Whitespace,
             buf: String::new(),
             file_loc: FileLocation {
-                column: 0,
+                column: 1,
                 line: 1,
             }
         }
@@ -198,15 +198,18 @@ pub struct FileLocation {
 impl FileLocation {
     fn advance(&mut self, s: &str) -> FileLocation {
         let loc = *self;
-        match s.rfind("\n") {
-            Some(i) => {
-                self.line += 1;
-                self.column = (s.len() - i) as u32;
-            }
-            None => {
-                self.column += s.len() as u32;
-            }
+
+        let mut split = s.split('\n');
+
+        let column_advance = split.next_back().unwrap().len() as u32;
+
+        for _ in split {
+            self.line += 1;
+            self.column = 1;
         }
+
+        self.column += column_advance;
+
         loc
     }
 }

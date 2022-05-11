@@ -267,6 +267,7 @@ impl<R: Read> TokenStream<R> {
                     let bin_op = BINARY_OPS.get(&&*s).copied();
                     let una_op = UNARY_OPS.get(&&*s).copied();
 
+                    // TODO: figure out wtf is going on here (make it clearer)
                     match (*last_token_kind, syntax_op, bin_op, una_op) {
                         (LastTokenKind::Value | LastTokenKind::EndBracket, _, Some((bin_op, pred)), _) => {
                             *last_token_kind = LastTokenKind::OperatorLike(OperandMode::Infix);
@@ -280,7 +281,7 @@ impl<R: Read> TokenStream<R> {
                             *last_token_kind = LastTokenKind::OperatorLike(OperandMode::Prefix);
                             TokenStreamElement::Identifier(una_op.to_owned(), Some((0, OperandMode::Prefix)))
                         }
-                        (LastTokenKind::StartBracket | LastTokenKind::OperatorLike(OperandMode::Prefix), Some(syntax_op), _, _) if matches!(syntax_op.operand_mode(), Some(OperandMode::Prefix)) => {
+                        (LastTokenKind::EndBracket | LastTokenKind::StartBracket | LastTokenKind::OperatorLike(OperandMode::Prefix), Some(syntax_op), _, _) if matches!(syntax_op.operand_mode(), Some(OperandMode::Prefix)) => {
                             *last_token_kind = LastTokenKind::OperatorLike(OperandMode::Prefix);
                             TokenStreamElement::SyntaxOp(syntax_op)
                         }
@@ -288,6 +289,7 @@ impl<R: Read> TokenStream<R> {
                             *last_token_kind = syntax_op.last_token_kind();
                             TokenStreamElement::SyntaxOp(syntax_op)
                         }
+                        (_, None, None, None) => return Some(Err(Error::new(file_loc, ErrorKind::UnexpectedToken))),
                         (ltk, so, bo, uo) => {
                             return Some(Err(Error::new(file_loc, ErrorKind::UnexpectedOperator(ltk, so, bo, uo))))
                         }

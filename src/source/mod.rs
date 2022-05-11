@@ -17,7 +17,7 @@ use self::parser::*;
 use self::error::Error;
 
 /// Parses the content of a reader into an abstract syntax tree representation of a program
-pub fn parse_source<R: Read>(read: R) -> Result<ast::Program, Error> {
+pub fn parse_source<R: Read>(read: R) -> Result<ast::Statements, Error> {
     let tokeniser = Tokeniser::from_char_iter(read.chars_iterator());
     let token_stream = TokenStream::new(tokeniser);
 
