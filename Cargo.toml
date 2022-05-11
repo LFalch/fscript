@@ -3,6 +3,7 @@ name = "fscript"
 version = "0.1.0"
 authors = ["LFalch <lucas@wasd.dk>"]
 edition = "2021"
+default-run = "fali"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

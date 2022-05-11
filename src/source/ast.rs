@@ -1,22 +1,23 @@
 use crate::types::Type;
+use super::tokeniser::FileLocation;
 
 pub type Program = Vec<Statement>;
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Identifer(String),
-    Constant(Primitive),
-    Some(Box<Expr>),
-    Array(Vec<Expr>),
-    Tuple(Vec<Expr>),
-    Call(String, Vec<Expr>),
-    Ref(Box<Expr>),
-    MutRef(Box<Expr>),
-    Deref(Box<Expr>),
-    Member(Box<Expr>, String),
-    Index(Box<Expr>, Box<Expr>),
-    Block(Vec<Statement>),
-    Function(Vec<String>, Box<Expr>),
+    Identifer(FileLocation, String),
+    Constant(FileLocation, Primitive),
+    Some(FileLocation, Box<Expr>),
+    Array(FileLocation, Vec<Expr>),
+    Tuple(FileLocation, Vec<Expr>),
+    Call(FileLocation, String, Vec<Expr>),
+    Ref(FileLocation, Box<Expr>),
+    MutRef(FileLocation, Box<Expr>),
+    Deref(FileLocation, Box<Expr>),
+    Member(FileLocation, Box<Expr>, String),
+    Index(FileLocation, Box<Expr>, Box<Expr>),
+    Block(FileLocation, Vec<Statement>),
+    Function(FileLocation, Vec<String>, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]

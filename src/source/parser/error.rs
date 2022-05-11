@@ -52,7 +52,28 @@ impl Display for ErrorKind {
             ErrorKind::EmptyStatement => write!(f, "empty statement"),
             ErrorKind::MalformedNumber => write!(f, "malformed number"),
             ErrorKind::UnrecognisedOperator(op) => write!(f, "unrecognised operator {}", op),
-            ErrorKind::UnexpectedOperator(ltk, _, _, _) => write!(f, "unexpected operator, last token was {:?}", ltk),
+            ErrorKind::UnexpectedOperator(ltk, so, bo, uo) => {
+                write!(f, "unexpected operator, last token was {ltk:?}, cur token: ")?;
+                if so.is_none() && bo.is_none() && uo.is_none() {
+                    return write!(f, "no pattern");
+                }
+                let mut or = false;
+
+                if let Some(so) = so {
+                    write!(f, "{:?}", so)?;
+                    or = true;
+                }
+                if let Some(bo) = bo {
+                    if or { write!(f, " | ")?; }
+                    write!(f, "{:?} ", bo)?;
+                    or = true;
+                }
+                if let Some(uo) = uo {
+                    if or { write!(f, " | ")?; }
+                    write!(f, "{:?}", uo)?;
+                }
+                Ok(())
+            }
             ErrorKind::Chars(ce) => ce.fmt(f),
         }
     }

@@ -324,7 +324,9 @@ impl<R: Read> TokenStream<R> {
                             *last_token_kind = syntax_op.last_token_kind();
                             TokenStreamElement::SyntaxOp(syntax_op)
                         }
-                        (ltk, so, bo, uo) => return Some(Err(Error::new(file_loc, ErrorKind::UnexpectedOperator(ltk, so, bo, uo)))),
+                        (ltk, so, bo, uo) => {
+                            return Some(Err(Error::new(file_loc, ErrorKind::UnexpectedOperator(ltk, so, bo, uo))))
+                        }
                     }
                 }
                 Class::UnrecognisedOperator => return Some(Err(Error::new(file_loc, ErrorKind::UnrecognisedOperator(s)))),
@@ -418,7 +420,7 @@ fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Program, Error> {
             Identifier(ident, None) => {
                 match ts.peek().flatten(file_loc)? {
                     SyntaxOp(Equal) => {ts.next(); Statement::Reassign(ident, parse_expr(file_loc, &mut None, ts, false)?)},
-                    SyntaxOp(End) => Statement::DiscardExpr(Expr::Identifer(ident)),
+                    SyntaxOp(End) => Statement::DiscardExpr(Expr::Identifer(file_loc, ident)),
                     _ => Statement::DiscardExpr(parse_expr(file_loc, &mut Some((file_loc, Identifier(ident, None))), ts, false)?),
                 }
             }
@@ -472,31 +474,31 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
                         s.next();
                         let (args, _trailing_comma) = comma_seperated(file_loc, &mut s.pre, &mut s.ts)?;
                         match s.next().flatten(file_loc)? {
-                            (_, TokenStreamElement::SyntaxOp(EndParen)) => Ok(Expr::Call(ident, args)),
+                            (_, TokenStreamElement::SyntaxOp(EndParen)) => Ok(Expr::Call(file_loc, ident, args)),
                             (file_loc, _ ) => Err(Error::new(file_loc, ErrorKind::MissingEndParen))
                         }
                     }
-                    _ => Ok(Expr::Identifer(ident)),
+                    _ => Ok(Expr::Identifer(file_loc, ident)),
                 }
             }
-            Identifier(ident, Some((_pred, OperandMode::Prefix))) => Ok(Expr::Call(ident, vec![parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?])),
+            Identifier(ident, Some((_pred, OperandMode::Prefix))) => Ok(Expr::Call(file_loc, ident, vec![parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?])),
             Identifier(_ident, Some((_, OperandMode::Infix))) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             NumberLiteral(n) => {
                 match (n.parse::<u64>(), n.parse::<i64>(), n.parse::<f64>()) {
-                    (Ok(u), Ok(_), _) => Ok(Expr::Constant(Primitive::AmbigInt(u))),
-                    (Ok(u), Err(_), _) => Ok(Expr::Constant(Primitive::Uint(u))),
-                    (Err(_), Ok(i), _) => Ok(Expr::Constant(Primitive::Int(i))),
-                    (_, _, Ok(f)) => Ok(Expr::Constant(Primitive::Float(f))),
+                    (Ok(u), Ok(_), _) => Ok(Expr::Constant(file_loc, Primitive::AmbigInt(u))),
+                    (Ok(u), Err(_), _) => Ok(Expr::Constant(file_loc, Primitive::Uint(u))),
+                    (Err(_), Ok(i), _) => Ok(Expr::Constant(file_loc, Primitive::Int(i))),
+                    (_, _, Ok(f)) => Ok(Expr::Constant(file_loc, Primitive::Float(f))),
                     (Err(_), Err(_), Err(_)) => Err(Error::new(file_loc, ErrorKind::MalformedNumber)),
                 }
             }
-            StringLiteral(s) => Ok(Expr::Constant(Primitive::String(s))),
+            StringLiteral(s) => Ok(Expr::Constant(file_loc, Primitive::String(s))),
             SyntaxOp(Equal | Member | WithType | Comma | EndParen | EndBlock | EndIndex) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(EndType | StartType) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(StartIndex) => {
                 let (elems, _trailing_comma) = comma_seperated(file_loc, &mut s.pre, &mut s.ts)?;
                 match s.next().flatten(file_loc)? {
-                    (_, TokenStreamElement::SyntaxOp(EndIndex)) => Ok(Expr::Array(elems)),
+                    (_, TokenStreamElement::SyntaxOp(EndIndex)) => Ok(Expr::Array(file_loc, elems)),
                     (file_loc, _ ) => Err(Error::new(file_loc, ErrorKind::MissingEndParen))
                 }
             }
@@ -505,21 +507,21 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
                 match s.next().flatten(file_loc)? {
                     (_, TokenStreamElement::SyntaxOp(EndParen)) => {
                         match (args.len(), trailing_comma) {
-                            (0, false) => Ok(Expr::Constant(Primitive::Unit)),
+                            (0, false) => Ok(Expr::Constant(file_loc, Primitive::Unit)),
                             (1, false) => Ok({
                                 let mut args = args;
                                 args.pop().unwrap()
                             }),
-                            _ => Ok(Expr::Tuple(args))
+                            _ => Ok(Expr::Tuple(file_loc, args))
                         }
                     }
                     (file_loc, _ ) => Err(Error::new(file_loc, ErrorKind::MissingEndParen))
                 }
             }
-            SyntaxOp(StartBlock) => tree_mut(&mut s.ts).map(Expr::Block),
-            SyntaxOp(Ref) => Ok(Expr::Ref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
-            SyntaxOp(MutRef) => Ok(Expr::MutRef(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
-            SyntaxOp(Deref) => Ok(Expr::Deref(Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
+            SyntaxOp(StartBlock) => tree_mut(&mut s.ts).map(|stmnts| Expr::Block(file_loc, stmnts)),
+            SyntaxOp(Ref) => Ok(Expr::Ref(file_loc, Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
+            SyntaxOp(MutRef) => Ok(Expr::MutRef(file_loc, Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
+            SyntaxOp(Deref) => Ok(Expr::Deref(file_loc, Box::new(parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?))),
             SyntaxOp(Return) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(Keyword(Fn)) => {
                 if let (file_loc, SyntaxOp(StartParen)) = s.next().flatten(file_loc)? {
@@ -527,12 +529,12 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
                     let args: Vec<_> = args
                         .into_iter()
                         .map(|arg| match arg {
-                            Expr::Identifer(s) => Ok(s),
+                            Expr::Identifer(_fl, s) => Ok(s),
                             _ => Err(Error::new(file_loc, ErrorKind::UnexpectedToken))
                         })
                         .collect_result()?;
                     if let (file_loc, SyntaxOp(EndParen)) = s.next().flatten(file_loc)? {
-                        parse_expr(file_loc, &mut None, &mut s.ts, false).map(|f| Expr::Function(args, Box::new(f)))
+                        parse_expr(file_loc, &mut None, &mut s.ts, false).map(|f| Expr::Function(file_loc, args, Box::new(f)))
                     } else {
                         Err(Error::new(file_loc, ErrorKind::UnexpectedToken))
                     }
@@ -547,10 +549,10 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
 
         loop { match (high_precedence, s.peek().flatten(file_loc)?) {
             (false, Identifier(_, Some((_, OperandMode::Infix)))) => {
-                let (_file_loc, next) = s.next().flatten(file_loc)?;
+                let (file_loc, next) = s.next().flatten(file_loc)?;
                 match next {
                     Identifier(ident, Some((pred, OperandMode::Infix))) => {
-                        prefix_stack.push((pred, ident, parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?));
+                        prefix_stack.push((pred, file_loc, ident, parse_expr(file_loc, &mut s.pre, &mut s.ts, true)?));
                     }
                     _ => unreachable!(),
                 }
@@ -561,7 +563,7 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
                 match next {
                     // TODO Handle member function calling syntax
                     Identifier(s, None) | NumberLiteral(s) => {
-                        expr = Ok(Expr::Member(Box::new(expr?), s));
+                        expr = Ok(Expr::Member(file_loc, Box::new(expr?), s));
                     }
                     _ => break Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
                 }
@@ -608,20 +610,20 @@ fn comma_seperated<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocati
     Ok((exprs, trailing_comma))
 }
 
-fn prefix_stack_unroll(main_expr: Expr, mut prefix_stack: Vec<(u8, String, Expr)>) -> Expr {
+fn prefix_stack_unroll(main_expr: Expr, mut prefix_stack: Vec<(u8, FileLocation, String, Expr)>) -> Expr {
     if prefix_stack.is_empty() {
         main_expr
     } else {
         let (split_i, _) = prefix_stack
             .iter()
-            .map(|&(n, _, _)| n)
+            .map(|&(n, _, _, _)| n)
             .enumerate()
             .rfold((0, u8::MAX), |(min_i, min_n), (i, n)| if n < min_n { (i, n) } else {(min_i, min_n)});
 
         let mut second_prefix_stack = prefix_stack.split_off(split_i);
-        let (_max_pred, func_ident, second_expr) = second_prefix_stack.remove(0);
+        let (_max_pred, file_loc, func_ident, second_expr) = second_prefix_stack.remove(0);
 
-        Expr::Call(func_ident, vec![prefix_stack_unroll(main_expr, prefix_stack), prefix_stack_unroll(second_expr, second_prefix_stack)])
+        Expr::Call(file_loc, func_ident, vec![prefix_stack_unroll(main_expr, prefix_stack), prefix_stack_unroll(second_expr, second_prefix_stack)])
     }
 }
 
@@ -630,5 +632,3 @@ pub(crate) fn is_op(s: &str) -> bool {
         || BINARY_OPS.contains_key(&s)
         || UNARY_OPS.contains_key(&s)
 }
-
-

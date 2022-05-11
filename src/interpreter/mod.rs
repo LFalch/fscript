@@ -2,14 +2,17 @@
 #![warn(missing_docs)]
 
 use std::collections::HashMap;
-use std::fmt::{self, Debug};
+use std::fmt::{self, Debug, Display};
 use std::cmp::PartialEq;
+
+use collect_result::CollectResult;
 
 use crate::source::ast::{
     Statement,
     Expr,
     Primitive::{self, String as LString, AmbigInt, Uint, Unit, None as LNone}
 };
+use crate::source::tokeniser::FileLocation;
 
 #[derive(Clone)]
 /// A function value
@@ -219,8 +222,36 @@ impl<'s> Enviroment<'s> {
     }
 }
 
+#[derive(Debug, Clone)]
+/// Represents an error that occured whislt interpreting the program
+pub struct RuntimeError {
+    file_loc: FileLocation,
+    error: String,
+}
+
+impl RuntimeError {
+    fn new<S: ToString>(fl: FileLocation, error: S) -> Self {
+        RuntimeError { file_loc: fl, error: error.to_string() }
+    }
+}
+
+impl Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{} {}", self.file_loc.line, self.file_loc.column, self.error)
+    }
+}
+
+macro_rules! rte {
+    ($fl:expr, $s:expr) => {
+        return Err(RuntimeError::new($fl, format!($s)))
+    };
+    ($fl:expr, $s:expr, $($a:expr),+) => {
+        return Err(RuntimeError::new($fl, format!($s, $($a),+)))
+    };
+}
+
 /// Runs an iterator of statements and returns the value returned by those statements
-pub fn run(iter: impl IntoIterator<Item=Statement>) -> Value {
+pub fn run(iter: impl IntoIterator<Item=Statement>) -> Result<Value, RuntimeError> {
     let mut stack = Vec::new();
     let mut env = Enviroment::new_standard(&mut stack);
 
@@ -230,23 +261,23 @@ pub fn run(iter: impl IntoIterator<Item=Statement>) -> Value {
     run_statements(iter, &mut env)
 }
 
-fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<'_>) -> Value {
+fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
     for statement in iter {
         match statement {
-            Statement::DiscardExpr(expr) => match eval(expr, env) {
+            Statement::DiscardExpr(expr) => match eval(expr, env)? {
                 Value::Primitive(Unit) => (),
                 other => eprintln!("warning: unused value {:?}", other),
             }
             Statement::ConstAssign(ident, None, expr) => {
-                let val = eval(expr, env);
+                let val = eval(expr, env)?;
                 env.add_const(ident, val);
             }
             Statement::VarAssign(ident, None, expr) => {
-                let val = eval(expr, env);
+                let val = eval(expr, env)?;
                 env.add_var(ident, val);
             }
             Statement::Reassign(ident, expr) => {
-                let val = eval(expr, env);
+                let val = eval(expr, env)?;
                 match env.get_mut(&ident) {
                     Some(var) => *var = val,
                     None => panic!("no such variable in scope: {}", ident)
@@ -257,31 +288,31 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
         }
     }
 
-    Value::Primitive(Unit)
+    Ok(Value::Primitive(Unit))
 }
 
-fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
-    match expr {
-        Expr::Identifer(ident) => if let Some(val) = env.get(&ident) {
+fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
+    Ok(match expr {
+        Expr::Identifer(fl, ident) => if let Some(val) = env.get(&ident) {
             val.clone()
         } else {
-            panic!("no such variable {}", ident);
+            return Err(RuntimeError::new(fl, format!("no such variable {}", ident)))
         }
-        Expr::Constant(lit) => Value::Primitive(lit),
-        Expr::Some(expr) => {
+        Expr::Constant(_fl, lit) => Value::Primitive(lit),
+        Expr::Some(_fl, expr) => {
             let expr = *expr;
-            Value::Some(Box::new(eval(expr, env)))
+            Value::Some(Box::new(eval(expr, env)?))
         }
-        Expr::Array(vec) => Value::Array(vec.into_iter().map(|expr| eval(expr, env)).collect()),
-        Expr::Tuple(vec) => Value::Tuple(vec.into_iter().map(|expr| eval(expr, env)).collect()),
-        Expr::Call(func, arg_exprs) => {
+        Expr::Array(_fl, vec) => Value::Array(vec.into_iter().map(|expr| eval(expr, env)).collect_result()?),
+        Expr::Tuple(_fl, vec) => Value::Tuple(vec.into_iter().map(|expr| eval(expr, env)).collect_result()?),
+        Expr::Call(fl, func, arg_exprs) => {
             let f = match env.get(&func) {
                 Some(Value::Function(f)) => f.clone(),
-                Some(_) => panic!("{} is not a function", func),
-                None => panic!("no such function {}", func),
+                Some(_) => rte!(fl, "{} is not a function", func),
+                None => rte!(fl, "no such function {}", func),
             };
 
-            let exprs: Vec<_> = arg_exprs.into_iter().map(|expr| eval(expr, env)).collect();
+            let exprs: Vec<_> = arg_exprs.into_iter().map(|expr| eval(expr, env)).collect_result()?;
 
             match f {
                 Function::Implemented(arg_names, body) => {
@@ -290,51 +321,52 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
                         .map(|s| s.clone())
                         .zip(exprs));
 
-                    run_statements(body.clone(), env)
+                    run_statements(body.clone(), env)?
                 }
                 Function::Builtin(f) => f(exprs, &*env),
             }
         }
-        Expr::Ref(expr) => match *expr {
-            Expr::Identifer(s) => Value::Ref(env.get_index(&s).expect("no value bound to name")),
+        Expr::Ref(_fl, expr) => match *expr {
+            Expr::Identifer(fl, s) => Value::Ref(env.get_index(&s).ok_or_else(|| RuntimeError::new(fl, "no value bound to name"))?),
             expr => {
-                let val = eval(expr, env);
+                let val = eval(expr, env)?;
                 Value::Ref(env.add(val))
             }
         },
-        Expr::MutRef(expr) => match *expr {
-            Expr::Identifer(s) => Value::MutRef(env.get_mut_index(&s).expect("no such variable")),
+        Expr::MutRef(_fl, expr) => match *expr {
+            Expr::Identifer(fl, s) => Value::MutRef(env.get_mut_index(&s).ok_or_else(|| RuntimeError::new(fl, "no value bound to name"))?),
             expr => {
-                let val = eval(expr, env);
+                let val = eval(expr, env)?;
                 Value::MutRef(env.add(val))
             }
         },
-        Expr::Deref(expr) => {
-            match eval(*expr, env) {
+        Expr::Deref(fl, expr) => {
+            match eval(*expr, env)? {
                 Value::Some(val) => *val,
                 Value::Primitive(LNone) => panic!("Value was None :("),
-                Value::Ref(n) | Value::MutRef(n) => env.index(0).clone(),
-                v => panic!("Cannot deref value: {:?}", v)
+                // TODO handle n
+                Value::Ref(_n) | Value::MutRef(_n) => env.index(0).clone(),
+                v => rte!(fl, "Cannot deref value: {:?}", v)
             }
         }
-        Expr::Member(expr, ident) => {
-            match (eval(*expr, env), &*ident) {
+        Expr::Member(fl, expr, ident) => {
+            match (eval(*expr, env)?, &*ident) {
                 (Value::Array(v), "len") => Value::Primitive(Uint(v.len() as u64)),
                 (Value::Primitive(LString(s)), "len") => Value::Primitive(Uint(s.len() as u64)),
                 (Value::Tuple(v), s) => if let Ok(n) = s.parse() {
                         if let Some(elem) = v.get::<usize>(n) {
                             elem.clone()
                         } else {
-                            panic!("tuple index out of bounds")
+                            rte!(fl, "tuple index out of bounds")
                         }
                 } else {
-                    panic!("can only use numbers as members on a tuple")
+                    rte!(fl, "can only use numbers as members on a tuple")
                 }
-                _ => panic!("No such member {} on that type", ident),
+                _ => rte!(fl, "No such member {} on that type", ident),
             }
         }
-        Expr::Index(indexable, index) => {
-            let index = match eval(*index, env) {
+        Expr::Index(fl, indexable, index) => {
+            let index = match eval(*index, env)? {
                 Value::Primitive(Uint(i) | AmbigInt(i)) => Ok(i as usize),
                 Value::Tuple(mut tu) => {
                     if tu.len() == 2 {
@@ -344,35 +376,35 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
                             (Value::Primitive(Uint(i) | AmbigInt(i)), Value::Primitive(Uint(j) | AmbigInt(j))) => {
                                 Err((i as usize, j as usize))
                             }
-                            _ => panic!("can only interpret two uints as a range")
+                            _ => rte!(fl, "can only interpret two uints as a range")
                         }
                     } else {
-                        panic!("can only interpret a tuple of two elements as a range")
+                        rte!(fl, "can only interpret a tuple of two elements as a range")
                     }
                 }
-                _ => panic!("only a uint or tuple can be an index"),
+                _ => rte!(fl, "only a uint or tuple can be an index"),
             };
-            match (eval(*indexable, env), index) {
+            match (eval(*indexable, env)?, index) {
                 (Value::Array(mut v), Ok(i)) => v.swap_remove(i),
                 (Value::Array(mut v), Err((i, j))) => {
                     v.drain(j..);
                     v.drain(..i);
                     Value::Array(v)
                 }
-                (Value::Primitive(LString(s)), Ok(i)) => Value::Primitive(LString(s.chars().nth(i).expect("character at that index").to_string())),
+                (Value::Primitive(LString(s)), Ok(i)) => Value::Primitive(LString(s.chars().nth(i).ok_or_else(|| RuntimeError::new(fl,"character at that index"))?.to_string())),
                 (Value::Primitive(LString(s)), Err((i, j))) => Value::Primitive(LString(
                     s.chars().skip(i).take(j-i).collect()
                 )),
-                _ => panic!("Invalid index"),
+                _ => rte!(fl, "Invalid index"),
             }
         }
         // TODO should be able to access outer scope
-        Expr::Block(statements) => run_statements(statements, &mut env.scope(None)),
-        Expr::Function(arg_names, body) => {
+        Expr::Block(_fl, statements) => run_statements(statements, &mut env.scope(None))?,
+        Expr::Function(_fl, arg_names, body) => {
             Value::Function(Function::Implemented(arg_names, match *body {
-                Expr::Block(statements) => statements,
+                Expr::Block(_fl, statements) => statements,
                 expr => vec![Statement::Return(expr)],
             }))
         }
-    }
+    })
 }

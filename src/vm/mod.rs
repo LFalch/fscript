@@ -40,6 +40,8 @@ impl MemoryArea {
             size,
         }
     }
+    #[allow(dead_code)]
+    // TODO: use this
     fn set_size(&mut self, size: usize) {
         if self.buf.is_null() {
             let _ = replace(self, Self::with_size(size));
@@ -48,6 +50,8 @@ impl MemoryArea {
             self.size = size;
         }
     }
+    #[allow(dead_code)]
+    // TODO: use this
     pub fn grow(&mut self, new_size: usize) {
         assert!(self.size < new_size);
         self.set_size(new_size);
@@ -82,7 +86,11 @@ impl Clone for MemoryArea {
 }
 #[derive(Debug, Clone)]
 struct RuntimeEnvironment {
+    #[allow(dead_code)]
+    // TODO: use this
     symbol_table: HashMap<(String, Type), Pointer>,
+    #[allow(dead_code)]
+    // TODO: use this
     stack_pointer: Pointer,
     instruction_pointer: Pointer,
     text: MemoryArea,
@@ -91,6 +99,8 @@ struct RuntimeEnvironment {
 }
 // TODO make this able to run code
 impl RuntimeEnvironment {
+    #[allow(dead_code)]
+    // TODO: use this
     pub fn next_ins(&mut self) -> ins::Instruction {
         ins::InstructionCoder(self).read_ins().unwrap()
     }
