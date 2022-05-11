@@ -34,14 +34,16 @@ impl<K: Ord, V, const N: usize> StackTable<K, V, N> {
 #[macro_export]
 macro_rules! stack_table {
     ($($key:expr => $val:expr,)*) => {
-        unsafe {
-            let mut ret = StackTable::new([
+        {
+            let inner = [
                 $(($key, $val)),*
-            ]);
+            ];
+            unsafe {
+                let mut ret = StackTable::new(inner);
+                ret.get_inner_mut().sort_unstable_by_key(|&(k, _)| k);
 
-            ret.get_inner_mut().sort_unstable_by_key(|&(k, _)| k);
-
-            ret
+                ret
+            }
         }
     };
 }
