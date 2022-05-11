@@ -5,7 +5,7 @@ pub type Program = Vec<Statement>;
 #[derive(Debug, Clone)]
 pub enum Expr {
     Identifer(String),
-    Literal(Literal),
+    Constant(Primitive),
     Some(Box<Expr>),
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
@@ -29,7 +29,7 @@ pub enum Statement {
 }
 
 #[derive(Debug, Clone)]
-pub enum Literal {
+pub enum Primitive {
     String(String),
     AmbigInt(u64),
     Int(i64),
@@ -40,9 +40,9 @@ pub enum Literal {
     None
 }
 
-impl PartialEq for Literal {
+impl PartialEq for Primitive {
     fn eq(&self, rhs: &Self) -> bool {
-        use self::Literal::*;
+        use self::Primitive::*;
         match (self, rhs) {
             (String(a), String(b)) => a == b,
             (Int(a), Int(b)) => a == b,

@@ -483,14 +483,14 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
             Identifier(_ident, Some((_, OperandMode::Infix))) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             NumberLiteral(n) => {
                 match (n.parse::<u64>(), n.parse::<i64>(), n.parse::<f64>()) {
-                    (Ok(u), Ok(_), _) => Ok(Expr::Literal(Literal::AmbigInt(u))),
-                    (Ok(u), Err(_), _) => Ok(Expr::Literal(Literal::Uint(u))),
-                    (Err(_), Ok(i), _) => Ok(Expr::Literal(Literal::Int(i))),
-                    (_, _, Ok(f)) => Ok(Expr::Literal(Literal::Float(f))),
+                    (Ok(u), Ok(_), _) => Ok(Expr::Constant(Primitive::AmbigInt(u))),
+                    (Ok(u), Err(_), _) => Ok(Expr::Constant(Primitive::Uint(u))),
+                    (Err(_), Ok(i), _) => Ok(Expr::Constant(Primitive::Int(i))),
+                    (_, _, Ok(f)) => Ok(Expr::Constant(Primitive::Float(f))),
                     (Err(_), Err(_), Err(_)) => Err(Error::new(file_loc, ErrorKind::MalformedNumber)),
                 }
             }
-            StringLiteral(s) => Ok(Expr::Literal(Literal::String(s))),
+            StringLiteral(s) => Ok(Expr::Constant(Primitive::String(s))),
             SyntaxOp(Equal | Member | WithType | Comma | EndParen | EndBlock | EndIndex) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(EndType | StartType) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
             SyntaxOp(StartIndex) => {
@@ -505,7 +505,7 @@ fn parse_expr<R: Read>(file_loc: FileLocation, pre: &mut Option<(FileLocation, T
                 match s.next().flatten(file_loc)? {
                     (_, TokenStreamElement::SyntaxOp(EndParen)) => {
                         match (args.len(), trailing_comma) {
-                            (0, false) => Ok(Expr::Literal(Literal::Unit)),
+                            (0, false) => Ok(Expr::Constant(Primitive::Unit)),
                             (1, false) => Ok({
                                 let mut args = args;
                                 args.pop().unwrap()

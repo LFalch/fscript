@@ -5,7 +5,11 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::cmp::PartialEq;
 
-use crate::source::ast::{Statement, Expr, Literal::{self, String as LString, AmbigInt, Uint, Unit, None as LNone}};
+use crate::source::ast::{
+    Statement,
+    Expr,
+    Primitive::{self, String as LString, AmbigInt, Uint, Unit, None as LNone}
+};
 
 #[derive(Clone)]
 /// A function value
@@ -49,7 +53,7 @@ impl Debug for Function {
 /// A value of some type
 pub enum Value {
     /// A basic type that would be defined with a literal constant
-    Literal(Literal),
+    Primitive(Primitive),
     /// An optional value that is `Some` and not `None`
     Some(Box<Value>),
     /// A tuple of values
@@ -230,7 +234,7 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
     for statement in iter {
         match statement {
             Statement::DiscardExpr(expr) => match eval(expr, env) {
-                Value::Literal(Unit) => (),
+                Value::Primitive(Unit) => (),
                 other => eprintln!("warning: unused value {:?}", other),
             }
             Statement::ConstAssign(ident, None, expr) => {
@@ -253,7 +257,7 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
         }
     }
 
-    Value::Literal(Unit)
+    Value::Primitive(Unit)
 }
 
 fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
@@ -263,7 +267,7 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
         } else {
             panic!("no such variable {}", ident);
         }
-        Expr::Literal(lit) => Value::Literal(lit),
+        Expr::Constant(lit) => Value::Primitive(lit),
         Expr::Some(expr) => {
             let expr = *expr;
             Value::Some(Box::new(eval(expr, env)))
@@ -308,15 +312,15 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
         Expr::Deref(expr) => {
             match eval(*expr, env) {
                 Value::Some(val) => *val,
-                Value::Literal(LNone) => panic!("Value was None :("),
+                Value::Primitive(LNone) => panic!("Value was None :("),
                 Value::Ref(n) | Value::MutRef(n) => env.index(0).clone(),
                 v => panic!("Cannot deref value: {:?}", v)
             }
         }
         Expr::Member(expr, ident) => {
             match (eval(*expr, env), &*ident) {
-                (Value::Array(v), "len") => Value::Literal(Uint(v.len() as u64)),
-                (Value::Literal(LString(s)), "len") => Value::Literal(Uint(s.len() as u64)),
+                (Value::Array(v), "len") => Value::Primitive(Uint(v.len() as u64)),
+                (Value::Primitive(LString(s)), "len") => Value::Primitive(Uint(s.len() as u64)),
                 (Value::Tuple(v), s) => if let Ok(n) = s.parse() {
                         if let Some(elem) = v.get::<usize>(n) {
                             elem.clone()
@@ -331,13 +335,13 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
         }
         Expr::Index(indexable, index) => {
             let index = match eval(*index, env) {
-                Value::Literal(Uint(i) | AmbigInt(i)) => Ok(i as usize),
+                Value::Primitive(Uint(i) | AmbigInt(i)) => Ok(i as usize),
                 Value::Tuple(mut tu) => {
                     if tu.len() == 2 {
                         let a = tu.swap_remove(0);
                         let b = tu.swap_remove(0);
                         match (a, b) {
-                            (Value::Literal(Uint(i) | AmbigInt(i)), Value::Literal(Uint(j) | AmbigInt(j))) => {
+                            (Value::Primitive(Uint(i) | AmbigInt(i)), Value::Primitive(Uint(j) | AmbigInt(j))) => {
                                 Err((i as usize, j as usize))
                             }
                             _ => panic!("can only interpret two uints as a range")
@@ -355,8 +359,8 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Value {
                     v.drain(..i);
                     Value::Array(v)
                 }
-                (Value::Literal(LString(s)), Ok(i)) => Value::Literal(LString(s.chars().nth(i).expect("character at that index").to_string())),
-                (Value::Literal(LString(s)), Err((i, j))) => Value::Literal(LString(
+                (Value::Primitive(LString(s)), Ok(i)) => Value::Primitive(LString(s.chars().nth(i).expect("character at that index").to_string())),
+                (Value::Primitive(LString(s)), Err((i, j))) => Value::Primitive(LString(
                     s.chars().skip(i).take(j-i).collect()
                 )),
                 _ => panic!("Invalid index"),

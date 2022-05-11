@@ -1,7 +1,7 @@
 use std::ops::{Add, Mul, Div, Rem, Shl, Shr, BitAnd, BitOr, BitXor};
 
 use super::{Value, Enviroment};
-use crate::source::ast::Literal::{String as LString, AmbigInt, Bool, Int, Uint, Float, Unit, None as LNone};
+use crate::source::ast::Primitive::{String as LString, AmbigInt, Bool, Int, Uint, Float, Unit, None as LNone};
 
 macro_rules! args {
     ($fn:ident, $args:expr; $($arg:ident),*) => {
@@ -25,12 +25,12 @@ macro_rules! bin_op {
         pub(super) fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
             args!($name, args; a, b);
             match (a, b) {
-                (Value::Literal(Int(a)), Value::Literal(Int(b))) => Value::Literal(Int($op(a, b))),
-                (Value::Literal(AmbigInt(a)), Value::Literal(AmbigInt(b))) => Value::Literal(AmbigInt($op(a, b))),
-                (Value::Literal(AmbigInt(a)), Value::Literal(Int(b))) => Value::Literal(Int($op(a as i64, b))),
-                (Value::Literal(Int(a)), Value::Literal(AmbigInt(b))) => Value::Literal(Int($op(a, b as i64))),
-                (Value::Literal(Uint(a) | AmbigInt(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Uint($op(a, b))),
-                $((Value::Literal($ext(a)), Value::Literal($ext(b))) => Value::Literal($ext($op(a, b))),)*
+                (Value::Primitive(Int(a)), Value::Primitive(Int(b))) => Value::Primitive(Int($op(a, b))),
+                (Value::Primitive(AmbigInt(a)), Value::Primitive(AmbigInt(b))) => Value::Primitive(AmbigInt($op(a, b))),
+                (Value::Primitive(AmbigInt(a)), Value::Primitive(Int(b))) => Value::Primitive(Int($op(a as i64, b))),
+                (Value::Primitive(Int(a)), Value::Primitive(AmbigInt(b))) => Value::Primitive(Int($op(a, b as i64))),
+                (Value::Primitive(Uint(a) | AmbigInt(a)), Value::Primitive(Uint(b) | AmbigInt(b))) => Value::Primitive(Uint($op(a, b))),
+                $((Value::Primitive($ext(a)), Value::Primitive($ext(b))) => Value::Primitive($ext($op(a, b))),)*
                 _ => panic!("mismatched types"),
             }
         }
@@ -39,18 +39,18 @@ macro_rules! bin_op {
 pub(super) fn sub(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(sub, args; a, b);
     match (a, b) {
-        (Value::Literal(AmbigInt(a)), Value::Literal(AmbigInt(b))) => {
-            Value::Literal(match (a.checked_sub(b), (a as i64).checked_sub(b as i64)) {
+        (Value::Primitive(AmbigInt(a)), Value::Primitive(AmbigInt(b))) => {
+            Value::Primitive(match (a.checked_sub(b), (a as i64).checked_sub(b as i64)) {
                 (Some(n), Some(_) | None) => AmbigInt(n),
                 (None, Some(n)) => Int(n),
                 (None, None) => panic!("sub overflowed")
             })
         }
-        (Value::Literal(Int(a)), Value::Literal(Int(b))) => Value::Literal(Int(a - b)),
-        (Value::Literal(AmbigInt(a)), Value::Literal(Int(b))) => Value::Literal(Int(a as i64 - b)),
-        (Value::Literal(Int(a)), Value::Literal(AmbigInt(b))) => Value::Literal(Int(a - b as i64)),
-        (Value::Literal(Uint(a) | AmbigInt(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Uint(a - b)),
-        (Value::Literal(Float(a)), Value::Literal(Float(b))) => Value::Literal(Float(a - b)),
+        (Value::Primitive(Int(a)), Value::Primitive(Int(b))) => Value::Primitive(Int(a - b)),
+        (Value::Primitive(AmbigInt(a)), Value::Primitive(Int(b))) => Value::Primitive(Int(a as i64 - b)),
+        (Value::Primitive(Int(a)), Value::Primitive(AmbigInt(b))) => Value::Primitive(Int(a - b as i64)),
+        (Value::Primitive(Uint(a) | AmbigInt(a)), Value::Primitive(Uint(b) | AmbigInt(b))) => Value::Primitive(Uint(a - b)),
+        (Value::Primitive(Float(a)), Value::Primitive(Float(b))) => Value::Primitive(Float(a - b)),
         _ => panic!("mismatched types"),
     }
 }
@@ -69,7 +69,7 @@ macro_rules! comp_eq {
     ($name:ident, $op:expr) => {
         pub(super) fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
             args!($name, args; a, b);
-            Value::Literal(Bool($op(&a, &b)))
+            Value::Primitive(Bool($op(&a, &b)))
         }
     };
 }
@@ -78,13 +78,13 @@ macro_rules! comp_cmp {
         pub(super) fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
             args!($name, args; a, b);
             match (a, b) {
-                (Value::Literal(Int(a)), Value::Literal(Int(b))) => Value::Literal(Bool($op(&a, &b))),
-                (Value::Literal(AmbigInt(a)), Value::Literal(Int(b))) => Value::Literal(Bool($op(&(a as i64), &b))),
-                (Value::Literal(Int(a)), Value::Literal(AmbigInt(b))) => Value::Literal(Bool($op(&a, &(b as i64)))),
-                (Value::Literal(Uint(a) | AmbigInt(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Bool($op(&a, &b))),
-                (Value::Literal(Bool(a)), Value::Literal(Bool(b))) => Value::Literal(Bool($op(&a, &b))),
-                (Value::Literal(Float(a)), Value::Literal(Float(b))) => Value::Literal(Bool($op(&a, &b))),
-                (Value::Literal(LString(a)), Value::Literal(LString(b))) => Value::Literal(Bool($op(&a, &b))),
+                (Value::Primitive(Int(a)), Value::Primitive(Int(b))) => Value::Primitive(Bool($op(&a, &b))),
+                (Value::Primitive(AmbigInt(a)), Value::Primitive(Int(b))) => Value::Primitive(Bool($op(&(a as i64), &b))),
+                (Value::Primitive(Int(a)), Value::Primitive(AmbigInt(b))) => Value::Primitive(Bool($op(&a, &(b as i64)))),
+                (Value::Primitive(Uint(a) | AmbigInt(a)), Value::Primitive(Uint(b) | AmbigInt(b))) => Value::Primitive(Bool($op(&a, &b))),
+                (Value::Primitive(Bool(a)), Value::Primitive(Bool(b))) => Value::Primitive(Bool($op(&a, &b))),
+                (Value::Primitive(Float(a)), Value::Primitive(Float(b))) => Value::Primitive(Bool($op(&a, &b))),
+                (Value::Primitive(LString(a)), Value::Primitive(LString(b))) => Value::Primitive(Bool($op(&a, &b))),
                 _ => panic!("mismatched types"),
             }
         }
@@ -103,9 +103,9 @@ comp_cmp!(lte, PartialOrd::le);
 pub(super) fn neg(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(neg, args; arg);
     match arg {
-        Value::Literal(Int(a)) => Value::Literal(Int(-a)),
-        Value::Literal(AmbigInt(a)) => Value::Literal(Int(-(a as i64))),
-        Value::Literal(Float(a)) => Value::Literal(Float(-a)),
+        Value::Primitive(Int(a)) => Value::Primitive(Int(-a)),
+        Value::Primitive(AmbigInt(a)) => Value::Primitive(Int(-(a as i64))),
+        Value::Primitive(Float(a)) => Value::Primitive(Float(-a)),
         _ => panic!("mismatched types {:?}", arg),
     }
 }
@@ -113,10 +113,10 @@ pub(super) fn neg(mut args: Vec<Value>, _env: &Enviroment) -> Value {
 pub(super) fn not(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(not, args; arg);
     match arg {
-        Value::Literal(Int(a)) => Value::Literal(Int(!a)),
-        Value::Literal(AmbigInt(a)) => Value::Literal(AmbigInt(!a)),
-        Value::Literal(Uint(a)) => Value::Literal(Uint(!a)),
-        Value::Literal(Bool(a)) => Value::Literal(Bool(!a)),
+        Value::Primitive(Int(a)) => Value::Primitive(Int(!a)),
+        Value::Primitive(AmbigInt(a)) => Value::Primitive(AmbigInt(!a)),
+        Value::Primitive(Uint(a)) => Value::Primitive(Uint(!a)),
+        Value::Primitive(Bool(a)) => Value::Primitive(Bool(!a)),
         _ => panic!("mismatched types"),
     }
 }
@@ -125,7 +125,7 @@ pub(super) fn concat(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(concat, args; a, b);
     match (a, b) {
         (Value::Array(mut a), Value::Array(mut b)) => Value::Array({a.append(&mut b); a}),
-        (Value::Literal(LString(a)), Value::Literal(LString(b))) => Value::Literal(LString(a + &b)),
+        (Value::Primitive(LString(a)), Value::Primitive(LString(b))) => Value::Primitive(LString(a + &b)),
         _ => panic!("mismatched types"),
     }
 }
@@ -133,12 +133,12 @@ pub(super) fn concat(mut args: Vec<Value>, _env: &Enviroment) -> Value {
 pub(super) fn pow(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(pow, args; a, b);
     match (a, b) {
-        (Value::Literal(Int(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Int(a.pow(b as u32))),
-        (Value::Literal(AmbigInt(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(AmbigInt(a.pow(b as u32))),
-        (Value::Literal(Uint(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Uint(a.pow(b as u32))),
-        (Value::Literal(Float(a)), Value::Literal(Int(b))) => Value::Literal(Float(a.powi(b as i32))),
-        (Value::Literal(Float(a)), Value::Literal(AmbigInt(b))) => Value::Literal(Float(a.powi(b as i32))),
-        (Value::Literal(Float(a)), Value::Literal(Float(b))) => Value::Literal(Float(a.powf(b))),
+        (Value::Primitive(Int(a)), Value::Primitive(Uint(b) | AmbigInt(b))) => Value::Primitive(Int(a.pow(b as u32))),
+        (Value::Primitive(AmbigInt(a)), Value::Primitive(Uint(b) | AmbigInt(b))) => Value::Primitive(AmbigInt(a.pow(b as u32))),
+        (Value::Primitive(Uint(a)), Value::Primitive(Uint(b) | AmbigInt(b))) => Value::Primitive(Uint(a.pow(b as u32))),
+        (Value::Primitive(Float(a)), Value::Primitive(Int(b))) => Value::Primitive(Float(a.powi(b as i32))),
+        (Value::Primitive(Float(a)), Value::Primitive(AmbigInt(b))) => Value::Primitive(Float(a.powi(b as i32))),
+        (Value::Primitive(Float(a)), Value::Primitive(Float(b))) => Value::Primitive(Float(a.powf(b))),
         _ => panic!("mismatched types"),
     }
 }
@@ -146,28 +146,28 @@ pub(super) fn pow(mut args: Vec<Value>, _env: &Enviroment) -> Value {
 pub(super) fn println(args: Vec<Value>, env: &Enviroment) -> Value {
     print(args, env);
     println!();
-    Value::Literal(Unit)
+    Value::Primitive(Unit)
 }
 pub(super) fn print(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(write, args; arg);
 
     match arg {
-        Value::Literal(LString(s)) => print!("{}", s),
+        Value::Primitive(LString(s)) => print!("{}", s),
         _ => panic!("can only print string"),
     }
 
-    Value::Literal(Unit)
+    Value::Primitive(Unit)
 }
 fn show_inner(arg: &Value, env: &Enviroment) -> String {
     match arg {
-        Value::Literal(LString(s)) => s.clone(),
-        Value::Literal(Int(i)) => format!("{}", i),
-        Value::Literal(Uint(i)) => format!("{}", i),
-        Value::Literal(AmbigInt(i)) => format!("{}", i),
-        Value::Literal(Float(f)) => format!("{}", f),
-        Value::Literal(Bool(b)) => format!("{}", b),
-        Value::Literal(Unit) => "()".to_owned(),
-        Value::Literal(LNone) => "None".to_owned(),
+        Value::Primitive(LString(s)) => s.clone(),
+        Value::Primitive(Int(i)) => format!("{}", i),
+        Value::Primitive(Uint(i)) => format!("{}", i),
+        Value::Primitive(AmbigInt(i)) => format!("{}", i),
+        Value::Primitive(Float(f)) => format!("{}", f),
+        Value::Primitive(Bool(b)) => format!("{}", b),
+        Value::Primitive(Unit) => "()".to_owned(),
+        Value::Primitive(LNone) => "None".to_owned(),
         Value::Some(val) => format!("Some({})", show_inner(&*val, env)),
         Value::Tuple(vs) => format!("{:?}", vs),
         Value::Array(vs) => format!("{:?}", vs),
@@ -178,7 +178,7 @@ fn show_inner(arg: &Value, env: &Enviroment) -> String {
 }
 pub(super) fn show(mut args: Vec<Value>, env: &Enviroment) -> Value {
     args!(show, args; arg);
-    Value::Literal(LString(match arg {
+    Value::Primitive(LString(match arg {
         Value::Ref(n) => show_inner(env.index(n), env),
         _ => panic!("arg needs to be a reference"),
     }))
