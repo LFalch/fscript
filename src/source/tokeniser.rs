@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use crate::compile::is_op;
+use super::parser::is_op;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Class {
@@ -191,8 +191,8 @@ impl<I: Iterator<Item=Result<char, E>>, E> Iterator for Tokeniser<I, E> {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct FileLocation {
-    line: u32,
-    column: u32,
+    pub(super) line: u32,
+    pub(super) column: u32,
 }
 
 impl FileLocation {

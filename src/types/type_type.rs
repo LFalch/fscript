@@ -1,3 +1,5 @@
+//! Type system
+
 use std::{
     // collections::HashMap,
     mem::size_of,
@@ -6,7 +8,7 @@ use std::{
 };
 use byteorder::{ByteOrder, LittleEndian};
 
-use super::types as t;
+use crate::types as t;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {

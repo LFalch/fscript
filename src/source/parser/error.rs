@@ -1,5 +1,7 @@
-use crate::chars::CharsError;
-use crate::tokeniser::FileLocation;
+use std::fmt::{self, Display};
+
+use super::super::chars::CharsError;
+use super::super::tokeniser::FileLocation;
 
 use super::{LastTokenKind, SyntaxOp};
 
@@ -19,6 +21,12 @@ impl Error {
     }
 }
 
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{} {}", self.file_loc.line, self.file_loc.column, self.kind)
+    }
+}
+
 #[derive(Debug)]
 pub enum ErrorKind {
     ExpectedExpression,
@@ -31,6 +39,23 @@ pub enum ErrorKind {
     UnrecognisedOperator(String),
     UnexpectedOperator(LastTokenKind, Option<SyntaxOp>, Option<(&'static str, u8)>, Option<&'static str>),
     Chars(CharsError),
+}
+
+impl Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ErrorKind::ExpectedExpression => write!(f, "expected expression"),
+            ErrorKind::ExpectedToken => write!(f, "expected token"),
+            ErrorKind::UnexpectedToken => write!(f, "unexpected oken"),
+            ErrorKind::MissingSemicolon => write!(f, "missing semicolon"),
+            ErrorKind::MissingEndParen => write!(f, "missing end parenthesis"),
+            ErrorKind::EmptyStatement => write!(f, "empty statement"),
+            ErrorKind::MalformedNumber => write!(f, "malformed number"),
+            ErrorKind::UnrecognisedOperator(op) => write!(f, "unrecognised operator {}", op),
+            ErrorKind::UnexpectedOperator(ltk, _, _, _) => write!(f, "unexpected operator, last token was {:?}", ltk),
+            ErrorKind::Chars(ce) => ce.fmt(f),
+        }
+    }
 }
 
 pub trait FlattenToResult<T, E>: Sized {

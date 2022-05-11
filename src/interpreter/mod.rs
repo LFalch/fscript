@@ -1,12 +1,19 @@
+//! An interpreter that runs the source abstract syntax tree directly
+#![warn(missing_docs)]
+
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::cmp::PartialEq;
 
-use crate::compile::{Statement, Expr, Literal::{self, String as LString, AmbigInt, Int, Uint, Float, Unit, None as LNone}};
+use crate::source::ast::{Statement, Expr, Literal::{self, String as LString, AmbigInt, Uint, Unit, None as LNone}};
 
 #[derive(Clone)]
+/// A function value
 pub enum Function {
+    /// A function whose body is not fscript.
+    /// Used for built-in functions.
     Builtin(fn(Vec<Value>, &Enviroment) -> Value),
+    /// A function that is defined in fscript
     Implemented(Vec<String>, Vec<Statement>),
 }
 
@@ -39,18 +46,27 @@ impl Debug for Function {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// A value of some type
 pub enum Value {
+    /// A basic type that would be defined with a literal constant
     Literal(Literal),
+    /// An optional value that is `Some` and not `None`
     Some(Box<Value>),
+    /// A tuple of values
     Tuple(Vec<Value>),
+    /// An array of values
     Array(Vec<Value>),
+    /// A function
     Function(Function),
+    /// An immutable reference with some address
     Ref(usize),
+    /// A mutable refrence wiht som address
     MutRef(usize),
 }
 
 type SVEnv = HashMap<String, usize>;
 
+/// The environment of variables declared in some scope
 pub struct Enviroment<'a> {
     stack: &'a mut Vec<Value>,
     parent_length: usize,
@@ -72,7 +88,7 @@ impl<'s> Enviroment<'s> {
     #[inline(always)]
     /// Stack will be cleared
     fn new_standard(stack: &'s mut Vec<Value>) -> Self {
-        use crate::run::fns::*;
+        use crate::interpreter::fns::*;
         stack.clear();
 
         let mut env = Enviroment {
@@ -199,6 +215,7 @@ impl<'s> Enviroment<'s> {
     }
 }
 
+/// Runs an iterator of statements and returns the value returned by those statements
 pub fn run(iter: impl IntoIterator<Item=Statement>) -> Value {
     let mut stack = Vec::new();
     let mut env = Enviroment::new_standard(&mut stack);

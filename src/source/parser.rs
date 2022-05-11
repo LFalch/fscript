@@ -8,10 +8,12 @@ use collect_result::CollectResult;
 
 use crate::stack_table;
 use crate::{
-    chars::{Chars, CharsError, CharsExt},
+    source::{
+        chars::{Chars, CharsError},
+        tokeniser::{Class, Tokeniser, Token, FileLocation},
+        ast::*,
+    },   
     stack_table::StackTable,
-    tokeniser::{Class, Tokeniser, Token, FileLocation},
-    Type
 };
 
 type OpFuncTable<const N: usize> = StackTable<&'static str, &'static str, N>;
@@ -219,7 +221,7 @@ impl Keyword {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum TokenStreamElement {
+pub(crate) enum TokenStreamElement {
     Identifier(String, Option<(u8, OperandMode)>),
     SyntaxOp(SyntaxOp),
     NumberLiteral(String),
@@ -242,13 +244,20 @@ impl Display for TokenStreamElement {
 
 #[derive(Debug)]
 #[must_use = "iterators are lazy and do nothing unless consumed"]
-struct TokenStream<R: Read> {
+pub(super) struct TokenStream<R: Read> {
     tokeniser: Tokeniser<Chars<R>, CharsError>,
     peeked: Option<(FileLocation, TokenStreamElement)>,
     last_token_kind: LastTokenKind,
 }
 
 impl<R: Read> TokenStream<R> {
+    pub fn new(tokeniser: Tokeniser<Chars<R>, CharsError>) -> Self {
+        TokenStream {
+            tokeniser,
+            peeked: None,
+            last_token_kind: LastTokenKind::EndBracket,
+        }
+    }
     #[must_use = "This will be just like calling `next` in case there is an error"]
     fn peek(&mut self) -> Option<Result<&TokenStreamElement, Error>> {
         match self {
@@ -343,68 +352,13 @@ impl<R: Read> Iterator for TokenStream<R> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum Literal {
-    String(String),
-    AmbigInt(u64),
-    Int(i64),
-    Uint(u64),
-    Float(f64),
-    Bool(bool),
-    Unit,
-    None
-}
-
-impl PartialEq for Literal {
-    fn eq(&self, rhs: &Self) -> bool {
-        use self::Literal::*;
-        match (self, rhs) {
-            (String(a), String(b)) => a == b,
-            (Int(a), Int(b)) => a == b,
-            (AmbigInt(a), Int(b)) => (*a) as i64 == *b,
-            (Int(a), AmbigInt(b)) => *a == (*b) as i64,
-            (Uint(a) | AmbigInt(a), Uint(b) | AmbigInt(b)) => a == b,
-            (Float(a), Float(b)) => a == b,
-            (Bool(a), Bool(b)) => a == b,
-            (Unit, Unit) => true,
-            (None, None) => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Expr {
-    Identifer(String),
-    Literal(Literal),
-    Some(Box<Expr>),
-    Array(Vec<Expr>),
-    Tuple(Vec<Expr>),
-    Call(String, Vec<Expr>),
-    Ref(Box<Expr>),
-    MutRef(Box<Expr>),
-    Deref(Box<Expr>),
-    Member(Box<Expr>, String),
-    Index(Box<Expr>, Box<Expr>),
-    Block(Vec<Statement>),
-    Function(Vec<String>, Box<Expr>),
-}
-
-#[derive(Debug, Clone)]
-pub enum Statement {
-    VarAssign(String, Option<Type>, Expr),
-    ConstAssign(String, Option<Type>, Expr),
-    Reassign(String, Expr),
-    DiscardExpr(Expr),
-    Return(Expr),
-}
-
 mod error;
 pub use self::error::{Error, ErrorKind};
 use self::error::FlattenToResult;
 
 #[inline(always)]
-fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
+/// 
+pub(super) fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Program, Error> {
     let ret = tree_mut(&mut ts)?;
     match ts.next() {
         Some(Ok((file_loc,_ ))) => Err(Error::new(file_loc, ErrorKind::UnexpectedToken)),
@@ -413,7 +367,7 @@ fn tree<R: Read>(mut ts: TokenStream<R>) -> Result<Vec<Statement>, Error> {
     }
 }
 
-fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Vec<Statement>, Error> {
+fn tree_mut<R: Read>(ts: &mut TokenStream<R>) -> Result<Program, Error> {
     let mut statements = Vec::new();
 
     loop {
@@ -677,16 +631,4 @@ pub(crate) fn is_op(s: &str) -> bool {
         || UNARY_OPS.contains_key(&s)
 }
 
-fn token_stream<R: Read>(read: R) -> TokenStream<R> {
-    let tokeniser = Tokeniser::from_char_iter(read.chars_iterator());
 
-    TokenStream {
-        tokeniser,
-        peeked: None,
-        last_token_kind: LastTokenKind::EndBracket,
-    }
-}
-
-pub fn compile<R: Read>(read: R) -> Result<Vec<Statement>, Error> {
-    tree(token_stream(read))
-}

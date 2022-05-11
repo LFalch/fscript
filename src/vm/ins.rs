@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use super::types::{Offset, Pointer};
+use crate::types::{Offset, Pointer};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Instruction {

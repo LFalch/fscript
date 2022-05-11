@@ -1,7 +1,7 @@
 use std::ops::{Add, Mul, Div, Rem, Shl, Shr, BitAnd, BitOr, BitXor};
 
 use super::{Value, Enviroment};
-use crate::compile::Literal::{String as LString, AmbigInt, Bool, Int, Uint, Float, Unit, None as LNone};
+use crate::source::ast::Literal::{String as LString, AmbigInt, Bool, Int, Uint, Float, Unit, None as LNone};
 
 macro_rules! args {
     ($fn:ident, $args:expr; $($arg:ident),*) => {
@@ -15,14 +15,14 @@ macro_rules! args {
     };
 }
 
-pub fn id(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn id(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(id, args; arg);
     arg
 }
 
 macro_rules! bin_op {
     ($name:ident, $op:expr $(,$ext:ident)*) => {
-        pub fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+        pub(super) fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
             args!($name, args; a, b);
             match (a, b) {
                 (Value::Literal(Int(a)), Value::Literal(Int(b))) => Value::Literal(Int($op(a, b))),
@@ -36,7 +36,7 @@ macro_rules! bin_op {
         }
     };
 }
-pub fn sub(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn sub(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(sub, args; a, b);
     match (a, b) {
         (Value::Literal(AmbigInt(a)), Value::Literal(AmbigInt(b))) => {
@@ -67,7 +67,7 @@ bin_op!(bitor, BitOr::bitor, Bool);
 
 macro_rules! comp_eq {
     ($name:ident, $op:expr) => {
-        pub fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+        pub(super) fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
             args!($name, args; a, b);
             Value::Literal(Bool($op(&a, &b)))
         }
@@ -75,7 +75,7 @@ macro_rules! comp_eq {
 }
 macro_rules! comp_cmp {
     ($name:ident, $op:expr) => {
-        pub fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+        pub(super) fn $name(mut args: Vec<Value>, _env: &Enviroment) -> Value {
             args!($name, args; a, b);
             match (a, b) {
                 (Value::Literal(Int(a)), Value::Literal(Int(b))) => Value::Literal(Bool($op(&a, &b))),
@@ -100,7 +100,7 @@ comp_cmp!(gte, PartialOrd::ge);
 comp_cmp!(lt, PartialOrd::lt);
 comp_cmp!(lte, PartialOrd::le);
 
-pub fn neg(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn neg(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(neg, args; arg);
     match arg {
         Value::Literal(Int(a)) => Value::Literal(Int(-a)),
@@ -110,7 +110,7 @@ pub fn neg(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     }
 }
 
-pub fn not(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn not(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(not, args; arg);
     match arg {
         Value::Literal(Int(a)) => Value::Literal(Int(!a)),
@@ -121,7 +121,7 @@ pub fn not(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     }
 }
 
-pub fn concat(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn concat(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(concat, args; a, b);
     match (a, b) {
         (Value::Array(mut a), Value::Array(mut b)) => Value::Array({a.append(&mut b); a}),
@@ -130,7 +130,7 @@ pub fn concat(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     }
 }
 
-pub fn pow(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn pow(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(pow, args; a, b);
     match (a, b) {
         (Value::Literal(Int(a)), Value::Literal(Uint(b) | AmbigInt(b))) => Value::Literal(Int(a.pow(b as u32))),
@@ -143,12 +143,12 @@ pub fn pow(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     }
 }
 
-pub fn println(args: Vec<Value>, env: &Enviroment) -> Value {
+pub(super) fn println(args: Vec<Value>, env: &Enviroment) -> Value {
     print(args, env);
     println!();
     Value::Literal(Unit)
 }
-pub fn print(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+pub(super) fn print(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(write, args; arg);
 
     match arg {
@@ -176,7 +176,7 @@ fn show_inner(arg: &Value, env: &Enviroment) -> String {
         Value::MutRef(n) => format!("@#{}", n),
     }
 }
-pub fn show(mut args: Vec<Value>, env: &Enviroment) -> Value {
+pub(super) fn show(mut args: Vec<Value>, env: &Enviroment) -> Value {
     args!(show, args; arg);
     Value::Literal(LString(match arg {
         Value::Ref(n) => show_inner(env.index(n), env),

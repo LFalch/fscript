@@ -1,3 +1,5 @@
+//! A statically sized binary search table implementation
+
 #[derive(Debug, Clone)]
 pub struct StackTable<K, V, const N: usize> {
     inner: [(K, V); N]
