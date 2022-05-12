@@ -183,3 +183,23 @@ pub(super) fn show(mut args: Vec<Value>, env: &Enviroment) -> Value {
         _ => panic!("arg needs to be a reference"),
     }))
 }
+
+use std::io::stdin;
+
+pub(super) fn read(args: Vec<Value>, _env: &Enviroment) -> Value {
+    args!(read, args;);
+    let mut s = String::new();
+    stdin().read_line(&mut s).unwrap();
+    Value::Primitive(LString(s))
+}
+
+pub(super) fn int(mut args: Vec<Value>, _env: &Enviroment) -> Value {
+    args!(read, args; arg);
+    match arg {
+        Value::Primitive(LString(s)) => match s.parse() {
+            Ok(i) => Value::Primitive(Int(i)),
+            _ => Value::Primitive(LNone),
+        }
+        _ => panic!("wrong type"),
+    }
+}

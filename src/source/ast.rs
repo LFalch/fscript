@@ -18,6 +18,8 @@ pub enum Expr {
     Index(FileLocation, Box<Expr>, Box<Expr>),
     Block(FileLocation, Statements),
     Function(FileLocation, Vec<String>, Box<Expr>),
+    If(FileLocation, Box<Expr>, Box<Expr>, Box<Expr>),
+    While(FileLocation, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone)]

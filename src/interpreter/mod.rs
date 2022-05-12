@@ -6,6 +6,7 @@ use std::fmt::{self, Debug, Display};
 use std::cmp::PartialEq;
 
 use collect_result::CollectResult;
+// use lazy_static::__Deref;
 
 use crate::source::ast::{
     Statement,
@@ -135,6 +136,8 @@ impl<'s> Enviroment<'s> {
         env.add_const("print", c(print));
         env.add_const("println", c(println));
         env.add_const("show", c(show));
+        env.add_const("read", c(read));
+        env.add_const("int", c(int));
 
         env
     }
@@ -398,6 +401,27 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
                 )),
                 _ => rte!(fl, "Invalid index"),
             }
+        }
+        Expr::If(fl, cond, if_true, if_false) => {
+            match eval(*cond, env)? {
+                Value::Primitive(Primitive::Bool(true)) => eval(*if_true, env)?,
+                Value::Primitive(Primitive::Bool(false)) => eval(*if_false, env)?,
+                _ => rte!(fl, "Condition was not a boolean"),
+            }
+        }
+        Expr::While(fl, cond, body) => {
+            let cond = &*cond;
+            let body = &*body;
+            loop {
+                match eval(cond.clone(), env)? {
+                    Value::Primitive(Primitive::Bool(true)) => {
+                        eval(body.clone(), env)?;
+                    }
+                    Value::Primitive(Primitive::Bool(false)) => break,
+                    _ => rte!(fl, "Condition was not a boolean"),
+                }
+            }
+            Value::Primitive(Unit)
         }
         // TODO should be able to access outer scope
         Expr::Block(_fl, statements) => run_statements(statements, &mut env.scope(None))?,
