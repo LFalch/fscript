@@ -2,51 +2,16 @@ use std::{
     io::Read,
 };
 
-use lazy_static::lazy_static;
 use collect_result::CollectResult;
 
-use crate::stack_table;
 use crate::{
     source::{
         tokeniser::FileLocation,
         token_stream::{Keyword, OperandMode, SyntaxOp, TokenStream, TokenStreamElement},
         ast::*,
         error::{Error, ErrorKind, FlattenToResult}
-    },   
-    stack_table::StackTable,
+    },
 };
-
-type OpFuncTable<const N: usize> = StackTable<&'static str, &'static str, N>;
-type OpFuncTableWithPrecedence<const N: usize> = StackTable<&'static str, (&'static str, u8), N>;
-
-lazy_static! {
-    pub static ref BINARY_OPS: OpFuncTableWithPrecedence<20> = stack_table! {
-        "+" => ("add", 11),
-        "-" => ("sub", 11),
-        "*" => ("mul", 12),
-        "/" => ("div", 12),
-        "%" => ("rem", 12),
-        "++" => ("concat", 10),
-        "**" => ("pow", 10),
-        "==" => ("eq", 3),
-        "!=" => ("neq", 3),
-        ">" => ("gt", 3),
-        ">=" => ("gte", 3),
-        "<" => ("lt", 3),
-        "<=" => ("lte", 3),
-        "&&" => ("and", 2),
-        "||" => ("or", 1),
-        "<<" => ("shl", 7),
-        ">>" => ("shr", 7),
-        "&" => ("bitand", 6),
-        "^" => ("xor", 5),
-        "|" => ("bitor", 4),
-    };
-    pub static ref UNARY_OPS: OpFuncTable<2> = stack_table! {
-        "-" => "neg",
-        "!" => "not",
-    };
-}
 
 #[inline(always)]
 /// 
@@ -315,10 +280,4 @@ fn prefix_stack_unroll(main_expr: Expr, mut prefix_stack: Vec<(u8, FileLocation,
 
         Expr::Call(file_loc, func_ident, vec![prefix_stack_unroll(main_expr, prefix_stack), prefix_stack_unroll(second_expr, second_prefix_stack)])
     }
-}
-
-pub(crate) fn is_op(s: &str) -> bool {
-    SyntaxOp::from_str(s).is_some()
-        || BINARY_OPS.contains_key(&s)
-        || UNARY_OPS.contains_key(&s)
 }

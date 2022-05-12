@@ -1,6 +1,6 @@
 use std::iter::Peekable;
 
-use super::parser::is_op;
+use super::token_stream::is_op;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Class {

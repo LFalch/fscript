@@ -3,14 +3,55 @@ use std::{
     fmt::{self, Display},
 };
 
+use lazy_static::lazy_static;
+use crate::stack_table;
 use crate::{
     source::{
         chars::{Chars, CharsError},
         tokeniser::{Class, Tokeniser, Token, FileLocation},
-        parser::{BINARY_OPS, UNARY_OPS},
         error::{Error, ErrorKind},
-    },   
+    },
+    stack_table::StackTable,
 };
+
+type OpFuncTable<const N: usize> = StackTable<&'static str, &'static str, N>;
+type OpFuncTableWithPrecedence<const N: usize> = StackTable<&'static str, (&'static str, u8), N>;
+
+lazy_static! {
+    pub static ref BINARY_OPS: OpFuncTableWithPrecedence<20> = stack_table! {
+        "+" => ("add", 11),
+        "-" => ("sub", 11),
+        "*" => ("mul", 12),
+        "/" => ("div", 12),
+        "%" => ("rem", 12),
+        "++" => ("concat", 10),
+        "**" => ("pow", 10),
+        "==" => ("eq", 3),
+        "!=" => ("neq", 3),
+        ">" => ("gt", 3),
+        ">=" => ("gte", 3),
+        "<" => ("lt", 3),
+        "<=" => ("lte", 3),
+        "&&" => ("and", 2),
+        "||" => ("or", 1),
+        "<<" => ("shl", 7),
+        ">>" => ("shr", 7),
+        "&" => ("bitand", 6),
+        "^" => ("xor", 5),
+        "|" => ("bitor", 4),
+    };
+    pub static ref UNARY_OPS: OpFuncTable<2> = stack_table! {
+        "-" => "neg",
+        "!" => "not",
+    };
+}
+
+pub(crate) fn is_op(s: &str) -> bool {
+    SyntaxOp::from_str(s).is_some()
+        || BINARY_OPS.contains_key(&s)
+        || UNARY_OPS.contains_key(&s)
+}
+
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SyntaxOp {
