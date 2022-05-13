@@ -23,6 +23,7 @@ pub enum Type {
     Option(Box<Type>),
     Reference(Box<Type>),
     Function(Vec<Type>, Box<Type>),
+    String,
 }
 
 impl Type {
@@ -42,6 +43,7 @@ impl Type {
             Option(ref t) => size_of::<t::Bool>() + t.size(),
             Reference(_) => size_of::<t::Pointer>(),
             Function(_, _) => size_of::<t::Pointer>(),
+            String => todo!(),
         }
     }
     #[inline(always)]
@@ -159,6 +161,7 @@ impl Display for Type {
             Function(ref args, ref ret) => {
                 write!(f, "fn{}->{}", TupleType(args), ret)
             }
+            String => "str".fmt(f),
         }
     }
 }
@@ -172,6 +175,7 @@ pub trait FType {
         Self::static_type().expect("no type impl")
     }
     fn as_bytes(&self) -> Vec<u8>;
+    fn from_bytes(buf: &[u8]) -> Self;
 }
 
 impl FType for t::Unit {
@@ -187,6 +191,9 @@ impl FType for t::Unit {
     fn as_bytes(&self) -> Vec<u8> {
         Vec::new()
     }
+    fn from_bytes(_buf: &[u8]) -> Self {
+        ()
+    }
 }
 
 impl FType for t::Bool {
@@ -201,6 +208,9 @@ impl FType for t::Bool {
     #[inline]
     fn as_bytes(&self) -> Vec<u8> {
         vec![*self as u8]
+    }
+    fn from_bytes(buf: &[u8]) -> Self {
+        buf[0] != 0
     }
 }
 
@@ -219,6 +229,10 @@ impl FType for t::Uint {
         LittleEndian::write_u64(&mut v, *self);
         v
     }
+    #[inline]
+    fn from_bytes(buf: &[u8]) -> Self {
+        LittleEndian::read_u64(buf)
+    }
 }
 
 impl FType for t::Int {
@@ -236,6 +250,10 @@ impl FType for t::Int {
         LittleEndian::write_i64(&mut v, *self);
         v
     }
+    #[inline]
+    fn from_bytes(buf: &[u8]) -> Self {
+        LittleEndian::read_i64(buf)
+    }
 }
 
 impl FType for t::Float {
@@ -250,8 +268,12 @@ impl FType for t::Float {
     #[inline]
     fn as_bytes(&self) -> Vec<u8> {
         let mut v = vec![0; size_of::<t::Float>()];
-        LittleEndian::write_u64(&mut v, self.to_bits());
+        LittleEndian::write_f64(&mut v, *self);
         v
+    }
+    #[inline]
+    fn from_bytes(buf: &[u8]) -> Self {
+        LittleEndian::read_f64(buf)
     }
 }
 
@@ -268,6 +290,10 @@ impl<T: FType> FType for Vec<T> {
         self.iter()
             .flat_map(|t| t.as_bytes())
             .collect()
+    }
+    #[inline]
+    fn from_bytes(buf: &[u8]) -> Self {
+        todo!()
     }
 }
 
@@ -291,6 +317,10 @@ macro_rules! impl_for_tuple {
                     $( .chain($tn.as_bytes().into_iter()) )*
                     .collect()
             }
+            #[inline]
+            fn from_bytes(buf: &[u8]) -> Self {
+                todo!()
+            }
         }
         )*
     };
@@ -310,6 +340,10 @@ impl FType for Option<t::Pointer> {
     fn as_bytes(&self) -> Vec<u8> {
         let p = self.map(t::Uint::from).unwrap_or(0);
         p.as_bytes()
+    }
+    #[inline]
+    fn from_bytes(buf: &[u8]) -> Self {
+        todo!()
     }
 }
 
@@ -332,5 +366,9 @@ impl<T: FType> FType for Option<T> {
                 v
             }
         }
+    }
+    #[inline]
+    fn from_bytes(buf: &[u8]) -> Self {
+        todo!()
     }
 }
