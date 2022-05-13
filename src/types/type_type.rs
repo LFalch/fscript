@@ -17,7 +17,7 @@ pub enum Type {
     Uint,
     Int,
     Float,
-    Array(Box<Type>, usize),
+    Array(Box<Type>),
     Tuple(Vec<Type>),
     // Struct(HashMap<String, Type>),
     Option(Box<Type>),
@@ -36,19 +36,19 @@ impl Type {
             Uint => size_of::<t::Uint>(),
             Int => size_of::<t::Int>(),
             Float => size_of::<t::Float>(),
-            Array(ref t, n) => t.size() * n,
             Tuple(ref ts) => ts.iter().map(Type::size).sum(),
             // Pointer optimisation
             Option(ref t) if t.is_reference() => t.size(),
             Option(ref t) => size_of::<t::Bool>() + t.size(),
             Reference(_) => size_of::<t::Pointer>(),
             Function(_, _) => size_of::<t::Pointer>(),
-            String => todo!(),
+            Array(_) => size_of::<t::Pointer>(),
+            String => size_of::<t::Pointer>(),
         }
     }
     #[inline(always)]
     pub fn is_reference(&self) -> bool {
-        matches!(*self, Type::Reference(_))
+        matches!(*self, Type::Reference(_) | Type::Function(_, _) | Type::Array(_) | Type::String)
     }
 }
 
@@ -77,8 +77,7 @@ impl FromStr for Type {
                 if !s.ends_with(']') {
                     return Err(TypeParserError::ArrayNoEndBracket)
                 }
-                let sep = s.find(';').ok_or(TypeParserError::MissingSemicolonInArray)?;
-                Type::Array(Box::new(Self::from_str(&s[1..sep])?), s[sep+1..s.len()-1].parse().map_err(TypeParserError::UnparseableSize)?)
+                Type::Array(Box::new(Self::from_str(&s[1..s.len()-1])?))
             }
             _ if s.starts_with('(') => {
                 if !s.ends_with(')') {
@@ -154,7 +153,7 @@ impl Display for Type {
             Uint => "uint".fmt(f),
             Int => "int".fmt(f),
             Float => "float".fmt(f),
-            Array(ref t, n) => write!(f, "[{};{}]", t, n),
+            Array(ref t) => write!(f, "[{}]", t),
             Tuple(ref ts) => write!(f, "{}", TupleType(ts)),
             Option(ref t) => write!(f, "?{}", t),
             Reference(ref t) => write!(f, "&{}", t),
@@ -167,12 +166,10 @@ impl Display for Type {
 }
 
 pub trait FType {
+    fn get_type() -> Type;
     #[inline(always)]
-    fn static_type() -> Option<Type> {
-        None
-    }
-    fn get_type(&self) -> Type {
-        Self::static_type().expect("no type impl")
+    fn size() -> usize {
+        Self::get_type().size()
     }
     fn as_bytes(&self) -> Vec<u8>;
     fn from_bytes(buf: &[u8]) -> Self;
@@ -180,11 +177,7 @@ pub trait FType {
 
 impl FType for t::Unit {
     #[inline(always)]
-    fn static_type() -> Option<Type> {
-        Some(Type::Unit)
-    }
-    #[inline]
-    fn get_type(&self) -> Type {
+    fn get_type() -> Type {
         Type::Unit
     }
     #[inline]
@@ -198,11 +191,7 @@ impl FType for t::Unit {
 
 impl FType for t::Bool {
     #[inline(always)]
-    fn static_type() -> Option<Type> {
-        Some(Type::Bool)
-    }
-    #[inline]
-    fn get_type(&self) -> Type {
+    fn get_type() -> Type {
         Type::Bool
     }
     #[inline]
@@ -216,11 +205,7 @@ impl FType for t::Bool {
 
 impl FType for t::Uint {
     #[inline(always)]
-    fn static_type() -> Option<Type> {
-        Some(Type::Uint)
-    }
-    #[inline]
-    fn get_type(&self) -> Type {
+    fn get_type() -> Type {
         Type::Uint
     }
     #[inline]
@@ -237,11 +222,7 @@ impl FType for t::Uint {
 
 impl FType for t::Int {
     #[inline(always)]
-    fn static_type() -> Option<Type> {
-        Some(Type::Int)
-    }
-    #[inline]
-    fn get_type(&self) -> Type {
+    fn get_type() -> Type {
         Type::Int
     }
     #[inline]
@@ -258,11 +239,7 @@ impl FType for t::Int {
 
 impl FType for t::Float {
     #[inline(always)]
-    fn static_type() -> Option<Type> {
-        Some(Type::Float)
-    }
-    #[inline]
-    fn get_type(&self) -> Type {
+    fn get_type() -> Type {
         Type::Float
     }
     #[inline]
@@ -279,21 +256,16 @@ impl FType for t::Float {
 
 impl<T: FType> FType for Vec<T> {
     #[inline]
-    fn get_type(&self) -> Type {
-        Type::Array(
-            Box::new(T::static_type().expect("requires inner type to be static")),
-            self.len()
-        )
+    fn get_type() -> Type {
+        Type::Array(Box::new(T::get_type()))
     }
     #[inline]
     fn as_bytes(&self) -> Vec<u8> {
-        self.iter()
-            .flat_map(|t| t.as_bytes())
-            .collect()
+        panic!("arrays are points")
     }
     #[inline]
-    fn from_bytes(buf: &[u8]) -> Self {
-        todo!()
+    fn from_bytes(_buf: &[u8]) -> Self {
+        panic!("arrays are points")
     }
 }
 
@@ -302,13 +274,8 @@ macro_rules! impl_for_tuple {
         $(
         impl<$t1: FType $(, $tn: FType)*> FType for ($t1, $($tn),*) {
             #[inline]
-            fn static_type() -> Option<Type> {
-                Some(Type::Tuple(vec![$t1::static_type()? $(, $tn::static_type()?)*]))
-            }
-            fn get_type(&self) -> Type {
-                #[allow(non_snake_case)]
-                let ($t1, $($tn),*) = self;
-                Type::Tuple(vec![$t1.get_type() $(, $tn.get_type())*])
+            fn get_type() -> Type {
+                Type::Tuple(vec![$t1::get_type() $(, $tn::get_type())*])
             }
             fn as_bytes(&self) -> Vec<u8> {
                 #[allow(non_snake_case)]
@@ -318,7 +285,7 @@ macro_rules! impl_for_tuple {
                     .collect()
             }
             #[inline]
-            fn from_bytes(buf: &[u8]) -> Self {
+            fn from_bytes(_buf: &[u8]) -> Self {
                 todo!()
             }
         }
@@ -336,39 +303,58 @@ impl_for_tuple!{
     T1, T2, T3, T4, T5, T6, T7;
 }
 
-impl FType for Option<t::Pointer> {
+impl FType for t::Pointer {
+    /// Panicks
+    fn get_type() -> Type {
+        panic!("raw pointer has no runtime type");
+    }
+    fn size() -> usize { 8 }
     fn as_bytes(&self) -> Vec<u8> {
-        let p = self.map(t::Uint::from).unwrap_or(0);
+        let p = t::Uint::from(*self);
         p.as_bytes()
     }
     #[inline]
     fn from_bytes(buf: &[u8]) -> Self {
-        todo!()
+        let p = LittleEndian::read_u64(&buf);
+        p.into()
     }
 }
 
 impl<T: FType> FType for Option<T> {
-    fn static_type() -> Option<Type> {
-        Some(Type::Option(Box::new(T::static_type()?)))
-    }
-    fn get_type(&self) -> Type {
-        match self {
-            Some(t) => Type::Option(Box::new(t.get_type())),
-            None => Self::static_type().unwrap()
-        }
+    fn get_type() -> Type {
+        Type::Option(Box::new(T::get_type()))
     }
     fn as_bytes(&self) -> Vec<u8> {
-        match self {
-            None => vec![false as u8; size_of::<t::Bool>() + T::static_type().unwrap().size()],
-            Some(i) => {
-                let mut v = vec![true as u8];
-                v.append(&mut i.as_bytes());
-                v
+        if T::get_type().is_reference() {
+            match self {
+                None => vec![false as u8; T::get_type().size()],
+                Some(i) => i.as_bytes(),
+            }
+        } else {
+            match self {
+                None => vec![false as u8; size_of::<t::Bool>() + T::get_type().size()],
+                Some(i) => {
+                    let mut v = vec![true as u8];
+                    v.append(&mut i.as_bytes());
+                    v
+                }
             }
         }
     }
     #[inline]
     fn from_bytes(buf: &[u8]) -> Self {
-        todo!()
+        if T::get_type().is_reference() {
+            if buf.iter().all(|v| *v == 0)  {
+                None
+            } else {
+                Some(T::from_bytes(buf))
+            }
+        } else {
+            if buf[0] == 0 {
+                None
+            } else {
+                Some(T::from_bytes(&buf[1..]))
+            }
+        }
     }
 }

@@ -14,30 +14,16 @@ pub type Float = f64;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pointer(pub(super) NonZeroUsize);
 pub type Offset = usize;
-pub const         MASK: usize = 0b1100_0000 << (64 - 8);
-pub const SECTION_SIZE: usize = 0b0100_0000 << (64 - 8);
-pub const    DATA_MASK: usize = 0b0000_0000 << (64 - 8);
-pub const    TEXT_MASK: usize = 0b0100_0000 << (64 - 8);
-pub const  HEAP_OFFSET: usize = 0b1000_0000 << (64 - 8);
-pub const STACK_OFFSET: usize = 0b1100_0000 << (64 - 8);
-pub const   STACK_MASK: usize = 0b1100_0000 << (64 - 8);
 impl Pointer {
     #[inline(always)]
-    pub fn data(i: usize) -> Self {
+    pub fn top(i: usize) -> Self {
         debug_assert_ne!(i, 0);
-        Pointer(unsafe{NonZeroUsize::new_unchecked(i | DATA_MASK)})
+        Pointer(unsafe{NonZeroUsize::new_unchecked(i)})
     }
     #[inline(always)]
-    pub fn text(i: usize) -> Self {
-        Pointer(unsafe{NonZeroUsize::new_unchecked(i | TEXT_MASK)})
-    }
-    #[inline(always)]
-    pub const fn heap(i: usize) -> Self {
-        Pointer(unsafe{NonZeroUsize::new_unchecked(i | HEAP_OFFSET)})
-    }
-    #[inline(always)]
-    pub const fn stack(i: usize) -> Self {
-        Pointer(unsafe{NonZeroUsize::new_unchecked(i | STACK_OFFSET)})
+    pub fn bottom(i: usize) -> Self {
+        debug_assert_ne!(i, usize::MAX);
+        Pointer(unsafe{NonZeroUsize::new_unchecked(usize::MAX - i)})
     }
 }
 impl From<Pointer> for u64 {

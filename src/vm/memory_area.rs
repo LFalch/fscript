@@ -1,87 +1,40 @@
 use std::{
-    alloc::{alloc, dealloc, realloc, Layout},
-    mem::replace,
     io::{Write, Result as IoResult, Error as IoError, ErrorKind},
-    ptr,
 };
+
+use crate::types::Pointer;
 
 use super::ins::StackOffset;
 
-#[derive(Debug)]
+#[derive(Debug, Default, Clone)]
 pub struct MemoryArea {
-    buf: *mut u8,
-    size: usize,
-}
-impl Default for MemoryArea {
-    #[inline(always)]
-    fn default() -> Self {
-        Self::new()
-    }
+    buf: Vec<u8>,
 }
 impl MemoryArea {
     #[inline(always)]
     pub const fn new() -> Self {
-        MemoryArea {
-            buf: ptr::null_mut(),
-            size: 0,
-        }
+        MemoryArea { buf: Vec::new() }
     }
     #[inline(always)]
     pub fn with_size(size: usize) -> Self {
-        let buf = unsafe { alloc(Layout::array::<u8>(size).unwrap()) };
-        MemoryArea {
-            buf,
-            size,
-        }
+        MemoryArea { buf: vec![0; size] }
     }
-    pub const fn size(&self) -> usize { self.size }
+    pub fn size(&self) -> usize { self.buf.len() }
     fn set_size(&mut self, size: usize) {
-        if self.buf.is_null() {
-            let _ = replace(self, Self::with_size(size));
-        } else {
-            self.buf = unsafe { realloc(self.buf, Layout::array::<u8>(self.size).unwrap(), size) };
-            self.size = size;
-        }
+        self.buf.resize(size, 0);
     }
     pub fn grow_to(&mut self, new_size: usize) {
-        assert!(self.size < new_size);
+        assert!(self.buf.len() < new_size);
         self.set_size(new_size);
     }
     pub fn grow_by(&mut self, additional: usize) {
-        self.set_size(self.size + additional);
+        self.set_size(self.buf.len() + additional);
     }
-    pub fn deref(&mut self, index: usize, size: usize) -> Option<&mut [u8]> {
-        // Saturating such that overflow will lead to a value that could never be larger than any usize
-        // (if self.size is max usize, then they could at most be equal)
-        if index.saturating_add(size) > self.size {
-            None
-        } else {
-            unsafe { Some( std::slice::from_raw_parts_mut(
-                    self.buf.add(index),
-                    size
-            ) ) }
-        }
+    pub fn deref_mut(&mut self, index: usize, size: usize) -> Option<&mut [u8]> {
+        self.buf.get_mut(index..index+size)
     }
-}
-impl Drop for MemoryArea {
-    fn drop(&mut self) {
-        if !self.buf.is_null() {
-            unsafe {
-                ptr::slice_from_raw_parts_mut(self.buf, self.size).drop_in_place();
-                dealloc(self.buf, Layout::array::<u8>(self.size).unwrap());
-                self.buf = ptr::null_mut();
-                self.size = 0;
-            }
-        }
-    }
-}
-impl Clone for MemoryArea {
-    fn clone(&self) -> Self {
-        let clone = MemoryArea::with_size(self.size);
-        unsafe {
-            ptr::copy_nonoverlapping(self.buf, clone.buf, clone.size);
-        }
-        clone
+    pub fn deref(&self, index: usize, size: usize) -> Option<&[u8]> {
+        self.buf.get(index..index+size)
     }
 }
 
@@ -101,7 +54,7 @@ impl Write for MemoryAreaCursor<'_> {
             self.1.grow_by(size);
         }
 
-        self.1.deref(self.0, size)
+        self.1.deref_mut(self.0, size)
             .ok_or(IoError::from(ErrorKind::OutOfMemory))?
             .iter_mut()
             .zip(buf.iter())
@@ -109,6 +62,10 @@ impl Write for MemoryAreaCursor<'_> {
 
         self.0 += size;
         Ok(size)
+    }
+    #[inline]
+    fn write_all(&mut self, buf: &[u8]) -> IoResult<()> {
+        self.write(buf).map(|_| ())
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -127,6 +84,10 @@ impl Stack {
         let so = so as usize;
         self.inner.len() - so
     }
+    pub fn offset_to_pointer(&self, so: StackOffset) -> Pointer {
+        let index = self.translate_offset(so);
+        Pointer::bottom(index)
+    }
     pub fn push<I: Iterator<Item=u8>>(&mut self, v: I) {
         self.inner.extend(v);
     }
@@ -141,7 +102,10 @@ impl Stack {
         let index = self.translate_offset(index);
         self.inner.get_mut(index .. index + size)
     }
-    pub fn deref(&mut self, index: usize, size: usize) -> Option<&mut [u8]> {
+    pub fn deref_mut(&mut self, index: usize, size: usize) -> Option<&mut [u8]> {
         self.inner.get_mut(index .. index + size)
+    }
+    pub fn deref(&self, index: usize, size: usize) -> Option<&[u8]> {
+        self.inner.get(index .. index + size)
     }
 }

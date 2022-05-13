@@ -5,24 +5,33 @@ use std::{
     ptr, num::NonZeroUsize,
 };
 
-use crate::{types::{self, Type, Pointer, FType}};
+use byteorder::{LittleEndian, ByteOrder};
 
-use super::ins;
+use crate::{types::{Type, Pointer, FType}};
+
+use super::ins::{self, Error as InsError};
 use super::memory_area::{MemoryAreaCursor, MemoryArea, Stack};
 
-pub type FunctionSignature = (Vec<Type>, Type);
-
 pub struct RuntimeBuilder {
-    symbol_table: HashMap<(String, FunctionSignature), Pointer>,
+    symbol_table: HashMap<(String, Type), Pointer>,
     native_functions: HashMap<Pointer, NativeFunction>,
-    data: MemoryArea,
-    text: MemoryArea,
+    top: MemoryArea,
+}
+
+impl Debug for RuntimeBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RuntimeEnvironment")
+            .field("symbol_table", &self.symbol_table)
+            .field("native_functions", &DebugKeyHashMap(&self.native_functions))
+            .field("top", &self.top)
+            .finish()
+    }
 }
 
 impl RuntimeBuilder {
     pub fn new() -> Self {
-        let mut data = MemoryArea::with_size(8);
-        data.deref(0, 8)
+        let mut top = MemoryArea::with_size(8);
+        top.deref_mut(0, 8)
             .unwrap()
             .iter_mut()
             .for_each(|p| *p = 0);
@@ -30,84 +39,82 @@ impl RuntimeBuilder {
         RuntimeBuilder {
             symbol_table: HashMap::new(),
             native_functions: HashMap::new(),
-            data,
-            text: MemoryArea::new(),
+            top
         }
     }
-    pub fn lookup(&self, name: &(String, FunctionSignature)) -> Pointer {
+    pub fn lookup(&self, name: &(String, Type)) -> Pointer {
         self.symbol_table[name]
     }
-    pub fn add_native<S: ToString>(mut self, name: S, signature: FunctionSignature, func: NativeFunction) -> Self {
-        let p = self.text.size();
-        self.text.grow_by(1);
-        // Make it some invalid opcode
-        self.text.deref(p, 1).unwrap()[0] = 255;
-        let p = Pointer::text(p);
-
-        self.symbol_table.insert((name.to_string(), signature), p);
+    pub fn add_native<S: ToString>(mut self, name: S, args_types: Vec<Type>, ret_type: Type, func: NativeFunction) -> Self {
+        let p = self.write([255].as_slice());
+        self.symbol_table.insert((name.to_string(), Type::Function(args_types, Box::new(ret_type))), p);
         self.native_functions.insert(p, func);
 
         self
     }
-    pub fn add(mut self, signature: (String, FunctionSignature), inss: &[ins::Instruction]) -> Self {
-        let p = self.write_text(inss);
-        self.symbol_table.insert(signature, p);
+    pub fn add_func<S: ToString>(mut self, name: S, args_types: Vec<Type>, ret_type: Type, inss: &[ins::Instruction]) -> Self {
+        let p = self.write_inss(inss);
+        self.symbol_table.insert((name.to_string(), Type::Function(args_types, Box::new(ret_type))), p);
 
         self
     }
-    pub fn add_from<R: Read>(mut self, signature: (String, FunctionSignature), reader: R) -> Self {
-        let p = self.write_text_from(reader);
-        self.symbol_table.insert(signature, p);
+    pub fn add<S: ToString, R: Read>(mut self, name: S, sym_type: Type, reader: R) -> Self {
+        let p = self.write(reader);
+        self.symbol_table.insert((name.to_string(), sym_type), p);
 
         self
     }
 
     pub fn finish_from<R: Read>(mut self, reader: R) -> Runtime {
-        let instruction_pointer = self.write_text_from(reader);
+        let instruction_pointer = self.write(reader);
 
         Runtime::new(self, instruction_pointer)
     }
     pub fn finish(mut self, inss: &[ins::Instruction]) -> Runtime {
-        let instruction_pointer = self.write_text(inss);
+        let instruction_pointer = self.write_inss(inss);
 
         Runtime::new(self, instruction_pointer)
     }
 
-    fn write_text_from<R: Read>(&mut self, mut reader: R) -> Pointer {
-        let mut cursor = MemoryAreaCursor::new(self.text.size(), &mut self.text);
+    fn write<R: Read>(&mut self, mut reader: R) -> Pointer {
+        let at = self.top.size();
+        let mut cursor = MemoryAreaCursor::new(at, &mut self.top);
         copy(&mut reader, &mut cursor).unwrap();
-        let at = cursor.0;
-        drop(cursor);
 
-        Pointer::text(at)
+        Pointer::top(at)
     }
-    fn write_text(&mut self, inss: &[ins::Instruction]) -> Pointer {
+    fn write_inss(&mut self, inss: &[ins::Instruction]) -> Pointer {
+        let at = self.top.size();
         let inss_size = inss.iter().map(|i| i.encoded_len()).sum();
-        let at = self.text.size();
-        self.text.grow_by(inss_size);
+        self.top.grow_by(inss_size);
 
-        let mut cursor = MemoryAreaCursor::new(at, &mut self.text);
+        let mut cursor = MemoryAreaCursor::new(at, &mut self.top);
 
         for ins in inss {
             ins::write_ins(&mut cursor, ins).unwrap();
         }
 
-        Pointer::text(at)
+        Pointer::top(at)
     }
 }
 
-pub struct RuntimeError;
+#[derive(Debug)]
+pub enum Error {
+    InvalidRead,
+    InvalidWrite,
+    InsError(InsError),
+    IoError(IoError),
+}
 
-pub type NativeFunction = fn(&mut Runtime) -> Result<(), RuntimeError>;
+pub type NativeFunction = fn(&mut Runtime) -> Result<(), Error>;
 
 #[derive(Clone)]
 pub struct Runtime {
     native_functions: HashMap<Pointer, NativeFunction>,
     call_stack: Vec<Pointer>,
     instruction_pointer: Pointer,
-    data: MemoryArea,
-    text: MemoryArea,
-    heap: MemoryArea,
+    top: MemoryArea,
+    heap_start: usize,
     stack: Stack,
 }
 
@@ -117,48 +124,62 @@ impl Runtime {
             native_functions: rb.native_functions,
             call_stack: Vec::new(),
             instruction_pointer,
-            data: rb.data,
-            text: rb.text,
-            heap: MemoryArea::new(),
+            heap_start: rb.top.size(),
+            top: rb.top,
             stack: Stack::new(),
         }
     }
 
-    pub fn next_ins(&mut self) -> Option<ins::Instruction> {
-        ins::read_ins(self).ok()
+    pub fn next_ins(&mut self) -> Result<ins::Instruction, Error> {
+        ins::read_ins(self).map_err(Error::InsError)
     }
-    pub fn deref(&mut self, p: Pointer, size: usize) -> Option<&mut [u8]> {
+    pub fn deref_mut(&mut self, p: Pointer, size: usize) -> Option<&mut [u8]> {
         let index = p.0.get();
-        let masked = index & types::MASK;
-        let index = index & (!types::MASK);
 
-        match masked.count_ones() {
-            0 => self.data.deref(index, size),
-            1 => self.text.deref(index, size),
-            2 => self.heap.deref(index, size),
-            3 => self.stack.deref(index, size),
-            _ => unreachable!(),
+        if index < self.heap_start {
+            // RO text and data
+            None
+        } else if index <= self.top.size() {
+            // Heap
+            self.top.deref_mut(index, size)
+        } else {
+            // Stack
+            let index = usize::MAX - index;
+            self.stack.deref_mut(index, size)
+        }
+    }
+    pub fn deref(&self, p: Pointer, size: usize) -> Option<&[u8]> {
+        let index = p.0.get();
+
+        if index <= self.top.size() {
+            // RO text and data or heap
+            self.top.deref(index, size)
+        } else {
+            // Stack
+            let index = usize::MAX - index;
+            self.stack.deref(index, size)
         }
     }
     pub fn dyn_alloc(&mut self, _size: usize) -> Pointer {
         todo!()
     }
-    pub fn read<T: FType>(&mut self, p: Pointer) -> T {
-        todo!()
+    pub fn read<T: FType>(&self, p: Pointer) -> Result<T, Error> {
+        let data: Vec<_> = self.deref(p, T::size()).ok_or(Error::InvalidRead)?.into_iter().copied().collect();
+        Ok(T::from_bytes(&data))
     }
-    pub fn pop_stack<T: FType>(&mut self) -> Result<T, RuntimeError> {
-        let val: Vec<_> = self.stack.pop(T::static_type().unwrap().size() as u16).collect();
+    pub fn pop_stack<T: FType>(&mut self) -> Result<T, Error> {
+        let val: Vec<_> = self.stack.pop(T::size() as u16).collect();
         let v = T::from_bytes(&val);
 
         Ok(v)
     }
-    pub fn push_stack<T: FType + Debug>(&mut self, value: T) {
+    pub fn push_stack<T: FType>(&mut self, value: T) {
         self.stack.push(value.as_bytes().into_iter());
     }
-    pub fn run(&mut self) -> Result<(), RuntimeError> {
+    pub fn run(&mut self) -> Result<(), Error> {
         use self::ins::Instruction::*;
         loop {
-            match self.next_ins().ok_or(RuntimeError)? {
+            match self.next_ins()? {
                 Return => {
                     match self.call_stack.pop() {
                         None => break,
@@ -181,21 +202,32 @@ impl Runtime {
                 Pop(so) => { let _ = self.stack.pop(so); }
                 PushLiteral(v) => self.stack.push(v.into_iter()),
                 StackMove { size, from, to } => {
-                    let v: Vec<_> = self.stack.read(from, size).ok_or(RuntimeError)?.iter().copied().collect();
-                    self.stack.read_mut(to, size).ok_or(RuntimeError)?
+                    let v: Vec<_> = self.stack.read(from, size).ok_or(Error::InvalidRead)?.iter().copied().collect();
+                    self.stack.read_mut(to, size).ok_or(Error::InvalidWrite)?
                         .iter_mut()
                         .zip(v.into_iter())
                         .for_each(|(p, v)| *p = v);
                 }
                 Jump(p) => self.instruction_pointer = p,
                 SkipIf(so) => {
-                    let b = self.stack.read(so, 1).ok_or(RuntimeError)?[0];
+                    let b = self.stack.read(so, 1).ok_or(Error::InvalidRead)?[0];
                     if b != 0 {
-                        self.next_ins().ok_or(RuntimeError)?;
+                        self.next_ins()?;
                     }
                 },
-                DynAlloc(_) => todo!(),
-                DynRead{..} => todo!(),
+                PopStackAddr(addr) => {
+                    self.push_stack(self.stack.offset_to_pointer(addr));
+                }
+                MemRead{addr, size, offset} => {
+                    let addr = self.stack.read(addr, 8).ok_or(Error::InvalidRead)?;
+                    let offset = self.stack.read(offset, 8).ok_or(Error::InvalidRead)?;
+
+                    let p: Pointer = (LittleEndian::read_u64(&addr) + LittleEndian::read_u64(&offset)).into();
+
+                    let to_push: Vec<_> = self.deref(p, size).ok_or(Error::InvalidRead)?.into_iter().copied().collect();
+
+                    self.stack.push(to_push.into_iter());
+                }
             }
         }
         Ok(())
@@ -211,10 +243,10 @@ impl Read for Runtime {
         let len = buf.len();
         self.instruction_pointer.0 = match self.deref(self.instruction_pointer, len) {
             Some(p) => unsafe {
-                ptr::copy_nonoverlapping(p.as_mut_ptr(), buf.as_mut_ptr(), len);
+                ptr::copy_nonoverlapping(p.as_ptr(), buf.as_mut_ptr(), len);
                 NonZeroUsize::new_unchecked(self.instruction_pointer.0.get() + len)
             }
-            None => return Err(IoError::from(std::io::ErrorKind::NotFound))
+            None => return Err(IoError::from(std::io::ErrorKind::PermissionDenied))
         };
         Ok(())
     }
@@ -224,7 +256,12 @@ struct DebugKeyHashMap<'a, D: Debug, V>(&'a HashMap<D, V>);
 
 impl<D: Debug, V> Debug for DebugKeyHashMap<'_, D, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_set().entries(self.0.keys()).finish()
+        f.debug_map()
+        .entries(self.0
+            .iter()
+            .map(|(d, v)| (d, v as *const V))
+        )
+        .finish()
     }
 }
 
@@ -234,8 +271,8 @@ impl Debug for Runtime {
             .field("native_functions", &DebugKeyHashMap(&self.native_functions))
             .field("call_stack", &self.call_stack)
             .field("instruction_pointer", &self.instruction_pointer)
-            .field("text", &self.text)
-            .field("heap", &self.heap)
+            .field("top", &self.top)
+            .field("heap_start", &self.heap_start)
             .field("stack", &self.stack)
             .finish()
     }

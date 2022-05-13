@@ -3,7 +3,7 @@ use std::mem::size_of;
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use crate::types::{Offset, Pointer};
+use crate::types::{Offset, Pointer, FType};
 
 pub type StackOffset = u16;
 
@@ -20,15 +20,18 @@ pub enum Instruction {
     },
     Jump(Pointer),
     SkipIf(StackOffset),
-    DynAlloc(Offset),
-    DynRead {
+    PopStackAddr(StackOffset),
+    MemRead {
         size: Offset,
         addr: StackOffset,
-        offset: Option<StackOffset>,
+        offset: StackOffset,
     }
 }
 
 impl Instruction {
+    pub fn push_literal<T: FType>(v: &T) -> Self {
+        Self::PushLiteral(v.as_bytes())
+    }
     pub fn encoded_len(&self) -> usize {
         use self::Instruction::*;
         1 + match self {
@@ -39,8 +42,8 @@ impl Instruction {
             StackMove { .. } => size_of::<Offset>() + size_of::<StackOffset>()  + size_of::<StackOffset>(),
             Jump(_) => size_of::<Pointer>(),
             SkipIf(_) => size_of::<StackOffset>(),
-            DynAlloc(_) => size_of::<Offset>(),
-            DynRead { offset, .. } => size_of::<Offset>() + size_of::<StackOffset>() + (offset.is_some() as usize) * size_of::<StackOffset>(),
+            PopStackAddr(_) => size_of::<StackOffset>(),
+            MemRead {..} => size_of::<Offset>() + size_of::<StackOffset>() + size_of::<StackOffset>(),
         }
     }
 }
@@ -53,9 +56,8 @@ pub mod opcode {
     pub const SMOV: u8 = 4;
     pub const JUMP: u8 = 5;
     pub const SKIPIF: u8 = 6;
-    pub const DALL: u8 = 7;
-    pub const DRD: u8 = 8;
-    pub const DRDO: u8 = 9;
+    pub const PSA: u8 = 7;
+    pub const READ: u8 = 8;
 }
 
 #[derive(Debug)]
@@ -108,19 +110,13 @@ pub fn write_ins<W: Write>(w: &mut W, ins: &Instruction) -> Result<(), Error> {
             LittleEndian::write_u16(&mut to_write[1..], o as u16);
             w.write_all(&to_write)?;
         }
-        &DynAlloc(size) => {
-            let mut to_write = [opcode::DALL, 0, 0, 0, 0, 0, 0, 0, 0];
-            LittleEndian::write_u64(&mut to_write[1..], size as u64);
+        &PopStackAddr(size) => {
+            let mut to_write = [opcode::PSA, 0, 0];
+            LittleEndian::write_u16(&mut to_write[1..3], size);
             w.write_all(&to_write)?;
         }
-        &DynRead { size, addr, offset: None } => {
-            let mut to_write = [opcode::DRD, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            LittleEndian::write_u64(&mut to_write[1..9], size as u64);
-            LittleEndian::write_u16(&mut to_write[9..11], addr as u16);
-            w.write_all(&to_write)?;
-        }
-        &DynRead { size, addr, offset: Some(offset) } => {
-            let mut to_write = [opcode::DRDO, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        &MemRead { size, addr, offset } => {
+            let mut to_write = [opcode::READ, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             LittleEndian::write_u64(&mut to_write[1..9], size as u64);
             LittleEndian::write_u16(&mut to_write[9..11], addr as u16);
             LittleEndian::write_u16(&mut to_write[11..13], offset as u16);
@@ -180,26 +176,19 @@ pub fn read_ins<R: Read>(r: &mut R) -> Result<Instruction, Error> {
             let offset = LittleEndian::read_u16(&offset);
             Ok(Instruction::SkipIf(offset))
         }
-        opcode::DALL => {
-            let mut size = [0; 8];
-            r.read_exact(&mut size)?;
-            let size = LittleEndian::read_u64(&size);
-            Ok(Instruction::DynAlloc(size as Offset))
+        opcode::PSA => {
+            let mut addr = [0; 2];
+            r.read_exact(&mut addr)?;
+            let addr = LittleEndian::read_u16(&addr);
+            Ok(Instruction::PopStackAddr(addr))
         }
-        opcode::DRD => {
-            let mut buf = [0; 10];
-            r.read_exact(&mut buf)?;
-            let size = LittleEndian::read_u64(&buf[..8]) as Offset;
-            let addr = LittleEndian::read_u16(&buf[8..10]);
-            Ok(Instruction::DynRead{size, addr, offset: None})
-        }
-        opcode::DRDO => {
+        opcode::READ => {
             let mut buf = [0; 12];
             r.read_exact(&mut buf)?;
             let size = LittleEndian::read_u64(&buf[..8]) as Offset;
             let addr = LittleEndian::read_u16(&buf[8..10]);
             let offset = LittleEndian::read_u16(&buf[10..]);
-            Ok(Instruction::DynRead{size, addr, offset: Some(offset)})
+            Ok(Instruction::MemRead{size, addr, offset})
         }
         _ => Err(Error::InvalidOpcode),
     }
@@ -213,14 +202,14 @@ mod tests {
     fn write_read() {
         let inss = [
             Instruction::Pop(16),
-            Instruction::Call(Pointer::text(0xdead)),
+            Instruction::Call(Pointer::top(0xdead)),
             Instruction::PushLiteral(vec![b'h', b'e', b'l', b'l', b'o']),
             Instruction::StackMove{from: 8, size: 4, to: 16},
             Instruction::SkipIf(0),
-            Instruction::Jump(Pointer::stack(125)),
-            Instruction::DynAlloc(128),
-            Instruction::DynRead { size: 16, addr: 0, offset: Some(9) },
-            Instruction::DynRead { size: 16, addr: 0, offset: None },
+            Instruction::Jump(Pointer::bottom(125)),
+            Instruction::PopStackAddr(128),
+            Instruction::MemRead { size: 16, addr: 0, offset: 9 },
+            Instruction::MemRead { size: 16, addr: 0, offset: 0 },
             Instruction::Return,
         ];
         let mut code = Vec::<u8>::new();
