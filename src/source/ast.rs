@@ -1,34 +1,64 @@
-use crate::types::Type;
-use super::tokeniser::FileLocation;
+use super::FileSpan;
+
+use crate::types::Type as TypeType;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Type {
+    Inferred,
+    TypeType(TypeType),
+}
 
 pub type Statements = Vec<Statement>;
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Identifer(FileLocation, String),
-    Constant(FileLocation, Primitive),
-    Some(FileLocation, Box<Expr>),
-    Array(FileLocation, Vec<Expr>),
-    Tuple(FileLocation, Vec<Expr>),
-    Call(FileLocation, String, Vec<Expr>),
-    Ref(FileLocation, Box<Expr>),
-    MutRef(FileLocation, Box<Expr>),
-    Deref(FileLocation, Box<Expr>),
-    Member(FileLocation, Box<Expr>, String),
-    Index(FileLocation, Box<Expr>, Box<Expr>),
-    Block(FileLocation, Statements),
-    Function(FileLocation, Vec<String>, Box<Expr>),
-    If(FileLocation, Box<Expr>, Box<Expr>, Box<Expr>),
-    While(FileLocation, Box<Expr>, Box<Expr>),
+    Identifer(FileSpan, String),
+    Constant(FileSpan, Primitive),
+    Some(FileSpan, Box<Expr>),
+    Array(FileSpan, Vec<Expr>),
+    Tuple(FileSpan, Vec<Expr>),
+    Call(FileSpan, String, Vec<Expr>),
+    Ref(FileSpan, Box<Expr>),
+    MutRef(FileSpan, Box<Expr>),
+    Deref(FileSpan, Box<Expr>),
+    Member(FileSpan, Box<Expr>, String),
+    Index(FileSpan, Box<Expr>, Box<Expr>),
+    Block(FileSpan, Statements),
+    If(FileSpan, Box<Expr>, Box<Expr>, Box<Expr>),
+    While(FileSpan, Box<Expr>, Box<Expr>),
+}
+
+impl Expr {
+    pub fn file_span(&self) -> FileSpan {
+        use self::Expr::*;
+        match *self {
+            Expr::Identifer(fs, _)
+            | Expr::Constant(fs, _)
+            | Some(fs, _)
+            | Array(fs, _)
+            | Tuple(fs, _)
+            | Call(fs, _, _)
+            | Ref(fs, _)
+            | MutRef(fs, _)
+            | Deref(fs, _)
+            | Member(fs, _, _)
+            | Index(fs, _, _)
+            | Block(fs, _)
+            | If(fs, _, _, _)
+            | While(fs, _, _)
+             => fs,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    VarAssign(String, Option<Type>, Expr),
-    ConstAssign(String, Option<Type>, Expr),
-    Reassign(String, Expr),
+    VarAssign(FileSpan, String, Type, Expr),
+    ConstAssign(FileSpan, String, Type, Expr),
+    Reassign(FileSpan, String, Expr),
+    Function(FileSpan, String, Vec<(String, Type)>, Expr),
     DiscardExpr(Expr),
-    Return(Expr),
+    Return(FileSpan, Expr),
 }
 
 #[derive(Debug, Clone)]

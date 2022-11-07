@@ -11,6 +11,14 @@ default-run = "fali"
 byteorder = "1"
 lazy_static = "1"
 collect_result = "0.1"
+cfgrammar = "0.12"
+lrlex = "0.12"
+lrpar = "0.12"
+
+[build-dependencies]
+cfgrammar = "0.12"
+lrlex = "0.12"
+lrpar = "0.12"
 
 [features]
 debug_print_statements = []

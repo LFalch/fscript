@@ -2,24 +2,56 @@
 
 use std::io::Read;
 
-pub mod chars;
-pub mod tokeniser;
-pub mod token_stream;
-pub mod parser;
+use std::io::read_to_string;
+
+mod parser;
 pub mod ast;
 
-pub mod error;
+use lrlex::DefaultLexeme;
+use lrpar::Lexeme;
+use lrpar::NonStreamingLexer;
+use lrpar::Span;
 
-use self::chars::CharsExt;
-use self::tokeniser::Tokeniser;
-use self::token_stream::TokenStream;
 use self::parser::*;
-use self::error::Error;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct FileLocation {
+    pub line: u16,
+    pub col: u16,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct FileSpan {
+    pub start: FileLocation,
+    pub end: FileLocation,
+}
+
+impl FileSpan {
+    pub fn new(lexer: &dyn NonStreamingLexer<DefaultLexeme, u32>, span: Span) -> Self {
+        let ((sl, sc), (el, ec)) = lexer.line_col(span);
+        FileSpan {
+            start: FileLocation { line: sl as u16, col: sc as u16 },
+            end: FileLocation { line: el as u16, col: ec as u16 }
+        }
+    }
+    pub fn from_lexeme(lexer: &dyn NonStreamingLexer<DefaultLexeme, u32>, lexeme: Result<DefaultLexeme, DefaultLexeme>) -> Self {
+        let ((sl, sc), (el, ec)) = lexer.line_col(lexeme.unwrap_or_else(|e| e).span());
+        FileSpan {
+            start: FileLocation { line: sl as u16, col: sc as u16 },
+            end: FileLocation { line: el as u16, col: ec as u16 }
+        }
+    }
+    pub fn ended_by(self, end: FileSpan) -> Self {
+        FileSpan {
+            end: end.end,
+            .. self
+        }
+    }
+}
 
 /// Parses the content of a reader into an abstract syntax tree representation of a program
-pub fn parse_source<R: Read>(read: R) -> Result<ast::Statements, Error> {
-    let tokeniser = Tokeniser::from_char_iter(read.chars_iterator());
-    let token_stream = TokenStream::new(tokeniser);
+pub fn parse_source<R: Read>(read: R) -> Result<ast::Statements, ()> {
+    let s = read_to_string(read).unwrap();
 
-    tree(token_stream)
+    parse(&s).ok_or(())
 }
