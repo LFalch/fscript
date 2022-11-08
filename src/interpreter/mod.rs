@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::fmt::{self, Debug, Display};
 use std::cmp::PartialEq;
+use std::iter;
+use std::mem::replace;
 
 use collect_result::CollectResult;
 // use lazy_static::__Deref;
@@ -13,8 +15,10 @@ use crate::source::ast::{
     Statements,
     Expr,
     Primitive::{self, String as LString, AmbigInt, Uint, Unit, None as LNone},
+    Type,
 };
-use crate::source::tokeniser::FileLocation;
+
+use crate::source::FileSpan;
 
 #[derive(Clone)]
 /// A function value
@@ -23,7 +27,27 @@ pub enum Function {
     /// Used for built-in functions.
     Builtin(fn(Vec<Value>, &Enviroment) -> Value),
     /// A function that is defined in fscript
-    Implemented(Vec<String>, Statements),
+    Implemented(Vec<(String, Type)>, SymbolTable, Statements),
+}
+
+impl Function {
+    fn call(self, args: Vec<Value>, env: &mut Enviroment) -> Result<Value, RuntimeError> {
+        match self {
+            Function::Implemented(arg_names, fn_sym_tab, body) => {
+                let Enviroment { stack, .. } = env;
+                let parent_stack_length = stack.len();
+
+                let ref mut env = Enviroment { stack: *stack, parent_stack_length, table: SymbolTable::new(), parent_tables: Box::new([&fn_sym_tab]) };
+
+                for ((name, _), val) in arg_names.into_iter().zip(args) {
+                    env.add_var(name, val);
+                }
+
+                run_statements(body.clone(), env).map(StatementsOk::get_return)
+            }
+            Function::Builtin(f) => Ok(f(args, &*env)),
+        }
+    }
 }
 
 impl PartialEq<Self> for Function {
@@ -37,10 +61,10 @@ impl Debug for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Function::Builtin(func) => write!(f, "built-in {:p}", func),
-            Function::Implemented(args, _) => {
+            Function::Implemented(args, _, _) => {
                 write!(f, "fn(")?;
                 let mut first = true;
-                for arg in args {
+                for (arg, _) in args {
                     if first {
                         first = false;
                     } else {
@@ -73,21 +97,22 @@ pub enum Value {
     MutRef(usize),
 }
 
-type SVEnv = HashMap<String, usize>;
+type SymbolTable = HashMap<String, (bool, usize)>;
 
 /// The environment of variables declared in some scope
+#[derive(Debug)]
 pub struct Enviroment<'a> {
     stack: &'a mut Vec<Value>,
-    parent_length: usize,
-    parent_const_envs: Box<[&'a SVEnv]>,
-    const_env: SVEnv,
-    var_env: SVEnv,
+    table: SymbolTable,
+    parent_stack_length: usize,
+    parent_tables: Box<[&'a SymbolTable]>,
 }
 
 impl Drop for Enviroment<'_> {
     #[inline]
     fn drop(&mut self) {
-        self.stack.drain(self.parent_length..);
+        // Drop everything upto the parent stack length
+        self.stack.drain(self.parent_stack_length..);
     }
 }
 
@@ -102,10 +127,9 @@ impl<'s> Enviroment<'s> {
 
         let mut env = Enviroment {
             stack: stack,
-            parent_length: 0,
-            parent_const_envs: Box::new([]),
-            const_env: SVEnv::new(),
-            var_env: SVEnv::new(),
+            parent_stack_length: 0,
+            parent_tables: Box::new([]),
+            table: SymbolTable::new(),
         };
         #[inline]
         fn c(f: fn(Vec<Value>, &Enviroment) -> Value) -> Value {
@@ -147,45 +171,42 @@ impl<'s> Enviroment<'s> {
     fn index_mut(&mut self, i: usize) -> &mut Value {
         &mut self.stack[i]
     }
-    fn get_index(&self, s: &str) -> Option<usize> {
-        let ret = self.var_env
-            .get(s)
-            .or_else(|| self.const_env.get(s));
+    fn get_index(&self, s: &str) -> Option<(bool, usize)> {
+        let ret = self.table.get(s);
 
         if let Some(ret) = ret {
             Some(*ret)
         } else {
-            let mut ret = None;
-            for env in self.parent_const_envs.iter().rev() {
-                if let Some(r) = env.get(s) {
-                    ret = Some(*r);
-                    break;
+            for table in self.parent_tables.iter().rev() {
+                if let Some(r) = table.get(s) {
+                    return Some(*r);
                 }
             }
-            ret
+
+            None
         }
     }
     #[inline]
     fn get(&self, s: &str) -> Option<&Value> {
-        if let Some(index) = self.get_index(s) {
+        if let Some((_, index)) = self.get_index(s) {
             Some(&self.stack[index])
         } else {
             None
         }
     }
-    #[inline]
-    fn get_mut_index(&self, s: &str) -> Option<usize> {
-        self.var_env.get(s).copied()
-    }
     fn get_mut(&mut self, s: &str) -> Option<&mut Value> {
-        if let Some(i) = self.get_mut_index(s) {
+        if let Some((true, i)) = self.get_index(s) {
             Some(self.index_mut(i))
         } else {
             None
         }
     }
+    fn get_next_index(&self) -> usize {
+        self.stack.len()
+    }
+
     fn add(&mut self, v: Value) -> usize {
-        let i = self.stack.len();
+        let i = self.get_next_index();
         match &v {
             Value::Ref(r) | Value::MutRef(r) if r >= &i => panic!("Dangling reference"),
             _ => ()
@@ -194,63 +215,63 @@ impl<'s> Enviroment<'s> {
         i
     }
     fn add_const(&mut self, s: impl ToString, v: Value) {
-        let s = s.to_string();
-        self.var_env.remove(&s);
         let i = self.add(v);
-        self.const_env.insert(s, i);
+
+        self.table.insert(s.to_string(), (false, i));
     }
     fn add_var(&mut self, s: impl ToString, v: Value) {
-        let s = s.to_string();
-        self.const_env.remove(&s);
         let i = self.add(v);
-        self.var_env.insert(s, i);
-    }
-    fn scope<'a>(&'a mut self, vars: impl IntoIterator<Item=(String, Value)>) -> Enviroment<'a> {
-        let parent_const_envs = self.parent_const_envs.iter().copied().chain(Some(&self.const_env)).collect();
 
+        self.table.insert(s.to_string(), (true, i));
+    }
+    fn scope<'a>(&'a mut self) -> Enviroment<'a> {
         Enviroment {
-            parent_length: self.stack.len(),
-            var_env: {
-                let vars = vars.into_iter(); 
-                let mut var_env = SVEnv::with_capacity(vars.size_hint().0);
-                for (var, val) in vars {
-                    var_env.insert(var, self.stack.len());
-                    self.stack.push(val);
-                }
-                var_env
-            },
+            parent_stack_length: self.stack.len(),
             stack: self.stack,
-            parent_const_envs,
-            const_env: SVEnv::new(),
+            table: SymbolTable::new(),
+            parent_tables: self.parent_tables.iter().copied().chain(iter::once(&self.table)).collect(),
         }
+    }
+    fn collapse_symbol_table(&self) -> SymbolTable {
+        let mut st = SymbolTable::new();
+
+        for pt in self.parent_tables.iter().chain(iter::once(&&self.table)) {
+            for (k, v) in *pt {
+                st.insert(k.clone(), *v);
+            }
+        }
+
+        st
     }
 }
 
 #[derive(Debug, Clone)]
-/// Represents an error that occured whislt interpreting the program
+/// Represents an error that occured whilst interpreting the program
 pub struct RuntimeError {
-    file_loc: FileLocation,
+    /// Location in the source file where error occured
+    file_loc: FileSpan,
+    /// Description of the error
     error: String,
 }
 
 impl RuntimeError {
-    fn new<S: ToString>(fl: FileLocation, error: S) -> Self {
+    fn new<S: ToString>(fl: FileSpan, error: S) -> Self {
         RuntimeError { file_loc: fl, error: error.to_string() }
     }
 }
 
 impl Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{} {}", self.file_loc.line, self.file_loc.column, self.error)
+        write!(f, "{}:{} - {}:{} {}", self.file_loc.start.line, self.file_loc.start.col, self.file_loc.end.line, self.file_loc.end.col, self.error)
     }
 }
 
 macro_rules! rte {
     ($fl:expr, $s:expr) => {
-        return Err(RuntimeError::new($fl, format!($s)))
+        Err(RuntimeError::new($fl, format!($s)))?
     };
     ($fl:expr, $s:expr, $($a:expr),+) => {
-        return Err(RuntimeError::new($fl, format!($s, $($a),+)))
+        Err(RuntimeError::new($fl, format!($s, $($a),+)))?
     };
 }
 
@@ -262,45 +283,99 @@ pub fn run(iter: impl IntoIterator<Item=Statement>) -> Result<Value, RuntimeErro
     #[cfg(feature = "debug_print_statements")]
     let iter = iter.into_iter().inspect(|statement| println!("{:?}", statement));
 
-    run_statements(iter, &mut env)
+    run_statements(iter, &mut env).map(StatementsOk::get_return)
 }
 
-fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
+#[derive(Debug, Clone, PartialEq)]
+enum StatementsOk {
+    Return(Value),
+    LastVal(Value),
+}
+
+impl StatementsOk {
+    fn get_return(self) -> Value {
+        match self {
+            StatementsOk::Return(v) | StatementsOk::LastVal(v) => v
+        }
+    }
+}
+
+macro_rules! eval {
+    ($e:expr, $env:expr) => {
+        match eval($e, $env) {
+            Ok(v) => v,
+            Err(NoValue::RuntimeError(e)) => return Err(e),
+            Err(NoValue::Return(r)) => return Ok(StatementsOk::Return(r)),
+        }
+    };
+}
+
+fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<'_>) -> Result<StatementsOk, RuntimeError> {
+    let mut last_val = Value::Primitive(Unit);
+    
     for statement in iter {
+        let mut eval = Value::Primitive(Unit);
+
         match statement {
-            Statement::DiscardExpr(expr) => match eval(expr, env)? {
-                Value::Primitive(Unit) => (),
-                other => eprintln!("warning: unused value {:?}", other),
-            }
-            Statement::ConstAssign(ident, None, expr) => {
-                let val = eval(expr, env)?;
+            Statement::DiscardExpr(expr) => eval = eval!(expr, env),
+            Statement::ConstAssign(_, ident, Type::Inferred, expr) => {
+                let val = eval!(expr, env);
                 env.add_const(ident, val);
             }
-            Statement::VarAssign(ident, None, expr) => {
-                let val = eval(expr, env)?;
+            Statement::VarAssign(_, ident, Type::Inferred, expr) => {
+                let val = eval!(expr, env);
                 env.add_var(ident, val);
             }
-            Statement::Reassign(ident, expr) => {
-                let val = eval(expr, env)?;
+            Statement::Reassign(_, ident, expr) => {
+                let val = eval!(expr, env);
                 match env.get_mut(&ident) {
                     Some(var) => *var = val,
-                    None => panic!("no such variable in scope: {}", ident)
+                    None => panic!("no such variable in scope: {}\n{env:?}", ident)
                 }
             }
-            Statement::ConstAssign(_, Some(_), _) | Statement::VarAssign(_, Some(_), _) => unimplemented!(),
-            Statement::Return(expr) => return eval(expr, env),
+            Statement::Function(_fl, func_name, arg_names, body) => {
+                let i = env.get_next_index();
+                env.add_const(func_name, Value::Primitive(LNone));
+
+                env.stack[i] = Value::Function(Function::Implemented(arg_names, env.collapse_symbol_table(), match body {
+                    Expr::Block(_fl, statements) => statements,
+                    expr => vec![Statement::Return(expr.file_span(), expr)],
+                }));
+            }
+            Statement::ConstAssign(_, _, _, _) | Statement::VarAssign(_, _, _, _) => unimplemented!(),
+            Statement::Return(_, expr) => return Ok(StatementsOk::Return(eval!(expr, env))),
+        }
+
+        match replace(&mut last_val, eval) {
+            Value::Primitive(Unit) => (),
+            other => eprintln!("warning: unused value {:?}", other),
         }
     }
 
-    Ok(Value::Primitive(Unit))
+    Ok(StatementsOk::LastVal(last_val))
 }
 
-fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
+#[derive(Debug, Clone)]
+/// No value was evaluated
+enum NoValue {
+    /// Return
+    Return(Value),
+    /// Represents an error that occured whislt interpreting the program
+    RuntimeError(RuntimeError) 
+}
+
+impl From<RuntimeError> for NoValue {
+    fn from(re: RuntimeError) -> Self {
+        NoValue::RuntimeError(re)
+    }
+}
+
+fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, NoValue> {
     Ok(match expr {
         Expr::Identifer(fl, ident) => if let Some(val) = env.get(&ident) {
             val.clone()
         } else {
-            return Err(RuntimeError::new(fl, format!("no such variable {}", ident)))
+            rte!(fl, "no such variable {}\n{env:#?}", ident)
         }
         Expr::Constant(_fl, lit) => Value::Primitive(lit),
         Expr::Some(_fl, expr) => {
@@ -311,34 +386,29 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
         Expr::Tuple(_fl, vec) => Value::Tuple(vec.into_iter().map(|expr| eval(expr, env)).collect_result()?),
         Expr::Call(fl, func, arg_exprs) => {
             let f = match env.get(&func) {
-                Some(Value::Function(f)) => f.clone(),
+                Some(Value::Function(f)) => f,
                 Some(_) => rte!(fl, "{} is not a function", func),
                 None => rte!(fl, "no such function {}", func),
-            };
+            }.clone();
 
             let exprs: Vec<_> = arg_exprs.into_iter().map(|expr| eval(expr, env)).collect_result()?;
 
-            match f {
-                Function::Implemented(arg_names, body) => {
-                    let ref mut env = env.scope(arg_names
-                        .iter()
-                        .map(|s| s.clone())
-                        .zip(exprs));
-
-                    run_statements(body.clone(), env)?
-                }
-                Function::Builtin(f) => f(exprs, &*env),
-            }
+            f.call(exprs, env)?
         }
         Expr::Ref(_fl, expr) => match *expr {
-            Expr::Identifer(fl, s) => Value::Ref(env.get_index(&s).ok_or_else(|| RuntimeError::new(fl, "no value bound to name"))?),
+            Expr::Identifer(fl, s) => Value::Ref(env.get_index(&s).ok_or_else(|| RuntimeError::new(fl, "no value bound to name"))?.1),
             expr => {
                 let val = eval(expr, env)?;
                 Value::Ref(env.add(val))
             }
         },
         Expr::MutRef(_fl, expr) => match *expr {
-            Expr::Identifer(fl, s) => Value::MutRef(env.get_mut_index(&s).ok_or_else(|| RuntimeError::new(fl, "no value bound to name"))?),
+            Expr::Identifer(fl, s) => Value::MutRef(
+                env
+                    .get_index(&s)
+                    .and_then(|(b, i)| if b { Some(i) } else { None })
+                    .ok_or_else(|| RuntimeError::new(fl, "no mutable value bound to name"))?
+            ),
             expr => {
                 let val = eval(expr, env)?;
                 Value::MutRef(env.add(val))
@@ -348,8 +418,7 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
             match eval(*expr, env)? {
                 Value::Some(val) => *val,
                 Value::Primitive(LNone) => panic!("Value was None :("),
-                // TODO handle n
-                Value::Ref(_n) | Value::MutRef(_n) => env.index(0).clone(),
+                Value::Ref(n) | Value::MutRef(n) => env.stack[n].clone(),
                 v => rte!(fl, "Cannot deref value: {:?}", v)
             }
         }
@@ -402,11 +471,12 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
                 _ => rte!(fl, "Invalid index"),
             }
         }
-        Expr::If(fl, cond, if_true, if_false) => {
+        Expr::If(_fl, cond, if_true, if_false) => {
+            let cond_fl = cond.file_span();
             match eval(*cond, env)? {
                 Value::Primitive(Primitive::Bool(true)) => eval(*if_true, env)?,
                 Value::Primitive(Primitive::Bool(false)) => eval(*if_false, env)?,
-                _ => rte!(fl, "Condition was not a boolean"),
+                _ => rte!(cond_fl, "Condition was not a boolean"),
             }
         }
         Expr::While(fl, cond, body) => {
@@ -423,13 +493,11 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, RuntimeError> {
             }
             Value::Primitive(Unit)
         }
-        // TODO should be able to access outer scope
-        Expr::Block(_fl, statements) => run_statements(statements, &mut env.scope(None))?,
-        Expr::Function(_fl, arg_names, body) => {
-            Value::Function(Function::Implemented(arg_names, match *body {
-                Expr::Block(_fl, statements) => statements,
-                expr => vec![Statement::Return(expr)],
-            }))
+        Expr::Block(_fl, statements) => {
+            match run_statements(statements, &mut env.scope())? {
+                StatementsOk::Return(v) => return Err(NoValue::Return(v)),
+                StatementsOk::LastVal(v) => v,
+            }
         }
     })
 }

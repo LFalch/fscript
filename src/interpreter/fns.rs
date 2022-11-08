@@ -85,7 +85,7 @@ macro_rules! comp_cmp {
                 (Value::Primitive(Bool(a)), Value::Primitive(Bool(b))) => Value::Primitive(Bool($op(&a, &b))),
                 (Value::Primitive(Float(a)), Value::Primitive(Float(b))) => Value::Primitive(Bool($op(&a, &b))),
                 (Value::Primitive(LString(a)), Value::Primitive(LString(b))) => Value::Primitive(Bool($op(&a, &b))),
-                _ => panic!("mismatched types"),
+                (a, b) => panic!("mismatched types {:?} {:?}", a, b),
             }
         }
     };
@@ -196,7 +196,7 @@ pub(super) fn read(args: Vec<Value>, _env: &Enviroment) -> Value {
 pub(super) fn int(mut args: Vec<Value>, _env: &Enviroment) -> Value {
     args!(read, args; arg);
     match arg {
-        Value::Primitive(LString(s)) => match s.parse() {
+        Value::Primitive(LString(s)) => match s.trim().parse() {
             Ok(i) => Value::Primitive(Int(i)),
             _ => Value::Primitive(LNone),
         }
