@@ -25,6 +25,18 @@ pub struct FileSpan {
 }
 
 impl FileSpan {
+    pub const fn dud() -> Self {
+        FileSpan {
+            start: FileLocation {
+                line: 0,
+                col: 0,
+            },
+            end: FileLocation {
+                line: 0,
+                col: 0,
+            },
+        }
+    }
     pub fn new(lexer: &dyn NonStreamingLexer<DefaultLexeme, u32>, span: Span) -> Self {
         let ((sl, sc), (el, ec)) = lexer.line_col(span);
         FileSpan {

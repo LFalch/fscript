@@ -51,28 +51,28 @@ Vars -> Vars:
 
 Var -> Var:
     'ID' { (get_str($lexer, $1), Type::Inferred) }
-  | 'ID' 'COLON' Type { (get_str($lexer, $1), Type::Concrete($3)) }
+  | 'ID' 'COLON' Type { (get_str($lexer, $1), Type::Named($3)) }
   ;
 
-Type -> ConcreteType:
-    'BOOL' { ConcreteType::Bool }
-  | 'UINT' { ConcreteType::Uint }
-  | 'INT' { ConcreteType::Int }
-  | 'FLOAT' { ConcreteType::Float }
-  | 'QUEST' Type { ConcreteType::Option(Box::new($2)) }
-  | 'AMP' Type { ConcreteType::Reference(Box::new($2)) }
-  | 'LBRACK' Type 'RBRACK' { ConcreteType::Array(Box::new($2)) }
+Type -> NamedType:
+    'BOOL' { NamedType::Bool }
+  | 'UINT' { NamedType::Uint }
+  | 'INT' { NamedType::Int }
+  | 'FLOAT' { NamedType::Float }
+  | 'QUEST' Type { NamedType::Option(Box::new($2)) }
+  | 'AMP' Type { NamedType::Reference(Box::new($2)) }
+  | 'LBRACK' Type 'RBRACK' { NamedType::Array(Box::new($2)) }
   | 'LPAREN' Types 'RPAREN' {
         match $2.len() {
-            0 => ConcreteType::Unit,
+            0 => NamedType::Unit,
             1 => $2.pop().unwrap(),
-            _ => ConcreteType::Tuple($2)
+            _ => NamedType::Tuple($2)
         }
     }
-  | 'FN' 'LPAREN' Types 'RPAREN' 'RET' Type { ConcreteType::Function($3, Box::new($6)) }
+  | 'FN' 'LPAREN' Types 'RPAREN' 'RET' Type { NamedType::Function($3, Box::new($6)) }
   ;
 
-Types -> Vec<ConcreteType>:
+Types -> Vec<NamedType>:
     Type 'COMMA' Types { {let mut v = $3; v.insert(0, $1); v} }
   | Type { vec![$1] }
   | { Vec::new() }
@@ -150,7 +150,7 @@ Primitive -> Primitive:
 %%
 use crate::source::ast::*;
 use crate::source::FileSpan;
-use crate::types::Type as ConcreteType;
+use crate::types::Type as NamedType;
 
 use lrpar::NonStreamingLexer;
 use lrlex::DefaultLexeme;

@@ -1,13 +1,13 @@
 use super::FileSpan;
 
-use crate::types::Type as ConcreteType;
+use crate::types::{Type as NamedType};
 
 use std::fmt::{self, Display};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Inferred,
-    Concrete(ConcreteType),
+    Named(NamedType),
 }
 
 pub type Statements = Vec<Statement>;
@@ -116,11 +116,11 @@ impl Expr {
 }
 
 #[derive(Debug, Clone)]
-pub enum Statement<T = Type> {
-    VarAssign(FileSpan, String, T, Expr),
-    ConstAssign(FileSpan, String, T, Expr),
+pub enum Statement {
+    VarAssign(FileSpan, String, Type, Expr),
+    ConstAssign(FileSpan, String, Type, Expr),
     Reassign(FileSpan, String, Expr),
-    Function(FileSpan, String, Vec<(String, T)>, Expr),
+    Function(FileSpan, String, Vec<(String, Type)>, Expr),
     DiscardExpr(Expr),
     Return(FileSpan, Expr),
 }
@@ -130,9 +130,9 @@ impl Display for Statement {
         use self::Statement::*;
         match self {
             VarAssign(_, n, Type::Inferred, e) => write!(f, "var {n} = {e}"),
-            VarAssign(_, n, Type::Concrete(t), e) => write!(f, "var {n}: {t} = {e}"),
+            VarAssign(_, n, Type::Named(t), e) => write!(f, "var {n}: {t} = {e}"),
             ConstAssign(_, n, Type::Inferred, e) => write!(f, "let {n} = {e}"),
-            ConstAssign(_, n, Type::Concrete(t), e) => write!(f, "let {n}: {t} = {e}"),
+            ConstAssign(_, n, Type::Named(t), e) => write!(f, "let {n}: {t} = {e}"),
             Reassign(_, n, e) => write!(f, "{n} = {e}"),
             Function(_, n, args, e) => {
                 write!(f, "fn {n}(")?;
@@ -143,7 +143,7 @@ impl Display for Statement {
                     }
                     write!(f, "{n}")?;
                     comma_first = true;
-                    if let Type::Concrete(t) = t {
+                    if let Type::Named(t) = t {
                         write!(f, ": {t}")?;
                     }
                 }

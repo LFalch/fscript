@@ -11,26 +11,39 @@ use byteorder::{ByteOrder, LittleEndian};
 use crate::types as t;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Type {
+pub struct NoTypeVariable;
+
+impl Display for NoTypeVariable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "_")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Type<V=NoTypeVariable> {
+    TypeVariable(V),
+    IntegralVariable(V),
     Unit,
     Bool,
     Uint,
     Int,
     Float,
-    Array(Box<Type>),
-    Tuple(Vec<Type>),
+    Array(Box<Type<V>>),
+    Tuple(Vec<Type<V>>),
     // Struct(HashMap<String, Type>),
-    Option(Box<Type>),
-    Reference(Box<Type>),
-    Function(Vec<Type>, Box<Type>),
+    Option(Box<Type<V>>),
+    Reference(Box<Type<V>>),
+    MutReference(Box<Type<V>>),
+    Function(Vec<Type<V>>, Box<Type<V>>),
     String,
 }
 
-impl Type {
+impl<V> Type<V> {
     #[inline]
     pub fn size(&self) -> usize {
         use Type::*;
         match *self {
+            TypeVariable(_) | IntegralVariable(_) => panic!("not concrete"),
             Unit => size_of::<t::Unit>(),
             Bool => size_of::<t::Bool>(),
             Uint => size_of::<t::Uint>(),
@@ -41,6 +54,7 @@ impl Type {
             Option(ref t) if t.is_reference() => t.size(),
             Option(ref t) => size_of::<t::Bool>() + t.size(),
             Reference(_) => size_of::<t::Pointer>(),
+            MutReference(_) => size_of::<t::Pointer>(),
             Function(_, _) => size_of::<t::Pointer>(),
             Array(_) => size_of::<t::Pointer>(),
             String => size_of::<t::Pointer>(),
@@ -49,6 +63,24 @@ impl Type {
     #[inline(always)]
     pub fn is_reference(&self) -> bool {
         matches!(*self, Type::Reference(_) | Type::Function(_, _) | Type::Array(_) | Type::String)
+    }
+    pub fn into<V2, F: FnMut(V) -> V2>(self, f: &mut F) -> Type<V2> {
+        match self {
+            Type::TypeVariable(v) => Type::TypeVariable(f(v)),
+            Type::IntegralVariable(v) => Type::IntegralVariable(f(v)),
+            Type::Unit => Type::Unit,
+            Type::Bool => Type::Bool,
+            Type::Uint => Type::Uint,
+            Type::Int => Type::Int,
+            Type::Float => Type::Float,
+            Type::Array(t) => Type::Array(Box::new((*t).into(f))),
+            Type::Tuple(ts) => Type::Tuple(ts.into_iter().map(|t| t.into(f)).collect()),
+            Type::Option(t) => Type::Option(Box::new((*t).into(f))),
+            Type::Reference(t) => Type::Reference(Box::new((*t).into(f))),
+            Type::MutReference(t) => Type::MutReference(Box::new((*t).into(f))),
+            Type::Function(ts, t) => Type::Function(ts.into_iter().map(|t| t.into(f)).collect(), Box::new((*t).into(f))),
+            Type::String => Type::String,
+        }
     }
 }
 
@@ -62,7 +94,7 @@ pub enum TypeParserError {
     UnparseableSize(<usize as FromStr>::Err)
 }
 
-impl FromStr for Type {
+impl<V> FromStr for Type<V> {
     type Err = TypeParserError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
@@ -119,13 +151,13 @@ impl FromStr for Type {
     }
 }
 
-impl Display for Type {
+impl<V: Display> Display for Type<V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Type::*;
 
-        struct TupleType<'a>(&'a [Type]);
+        struct TupleType<'a, V>(&'a [Type<V>]);
 
-        impl Display for TupleType<'_> {
+        impl<V: Display> Display for TupleType<'_, V> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 write!(f, "(")?;
 
@@ -157,16 +189,19 @@ impl Display for Type {
             Tuple(ref ts) => write!(f, "{}", TupleType(ts)),
             Option(ref t) => write!(f, "?{}", t),
             Reference(ref t) => write!(f, "&{}", t),
+            MutReference(ref t) => write!(f, "@{}", t),
             Function(ref args, ref ret) => {
                 write!(f, "fn{}->{}", TupleType(args), ret)
             }
             String => "str".fmt(f),
+            TypeVariable(ref c) => write!(f, "'{c}"),
+            IntegralVariable(ref c) => write!(f, "int('{c})"),
         }
     }
 }
 
-pub trait FType {
-    fn get_type() -> Type;
+pub trait FType<V=NoTypeVariable> {
+    fn get_type() -> Type<V>;
     #[inline(always)]
     fn size() -> usize {
         Self::get_type().size()
@@ -175,9 +210,9 @@ pub trait FType {
     fn from_bytes(buf: &[u8]) -> Self;
 }
 
-impl FType for t::Unit {
+impl<V> FType<V> for t::Unit {
     #[inline(always)]
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         Type::Unit
     }
     #[inline]
@@ -189,9 +224,9 @@ impl FType for t::Unit {
     }
 }
 
-impl FType for t::Bool {
+impl<V> FType<V> for t::Bool {
     #[inline(always)]
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         Type::Bool
     }
     #[inline]
@@ -203,9 +238,9 @@ impl FType for t::Bool {
     }
 }
 
-impl FType for t::Uint {
+impl<V> FType<V> for t::Uint {
     #[inline(always)]
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         Type::Uint
     }
     #[inline]
@@ -220,9 +255,9 @@ impl FType for t::Uint {
     }
 }
 
-impl FType for t::Int {
+impl<V> FType<V> for t::Int {
     #[inline(always)]
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         Type::Int
     }
     #[inline]
@@ -237,9 +272,9 @@ impl FType for t::Int {
     }
 }
 
-impl FType for t::Float {
+impl<V> FType<V> for t::Float {
     #[inline(always)]
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         Type::Float
     }
     #[inline]
@@ -254,9 +289,9 @@ impl FType for t::Float {
     }
 }
 
-impl<T: FType> FType for Vec<T> {
+impl<V, T: FType<V>> FType<V> for Vec<T> {
     #[inline]
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         Type::Array(Box::new(T::get_type()))
     }
     #[inline]
@@ -272,9 +307,9 @@ impl<T: FType> FType for Vec<T> {
 macro_rules! impl_for_tuple {
     ($($t1:ident, $($tn:ident),*;)+) => {
         $(
-        impl<$t1: FType $(, $tn: FType)*> FType for ($t1, $($tn),*) {
+        impl<V, $t1: FType<V> $(, $tn: FType<V>)*> FType<V> for ($t1, $($tn),*) {
             #[inline]
-            fn get_type() -> Type {
+            fn get_type() -> Type<V> {
                 Type::Tuple(vec![$t1::get_type() $(, $tn::get_type())*])
             }
             fn as_bytes(&self) -> Vec<u8> {
@@ -303,15 +338,15 @@ impl_for_tuple!{
     T1, T2, T3, T4, T5, T6, T7;
 }
 
-impl FType for t::Pointer {
+impl<V> FType<V> for t::Pointer {
     /// Panicks
-    fn get_type() -> Type {
+    fn get_type() -> Type<V> {
         panic!("raw pointer has no runtime type");
     }
     fn size() -> usize { 8 }
     fn as_bytes(&self) -> Vec<u8> {
         let p = t::Uint::from(*self);
-        p.as_bytes()
+        <u64 as FType>::as_bytes(&p)
     }
     #[inline]
     fn from_bytes(buf: &[u8]) -> Self {
@@ -320,8 +355,8 @@ impl FType for t::Pointer {
     }
 }
 
-impl<T: FType> FType for Option<T> {
-    fn get_type() -> Type {
+impl<V, T: FType<V>> FType<V> for Option<T> {
+    fn get_type() -> Type<V> {
         Type::Option(Box::new(T::get_type()))
     }
     fn as_bytes(&self) -> Vec<u8> {
