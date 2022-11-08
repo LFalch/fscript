@@ -23,7 +23,7 @@ fn main() {
 
                         if show_tree {
                             println!("AST Program:");
-                            code.iter().for_each(|statement| println!("{:?}", statement));
+                            code.iter().for_each(|statement| println!("\t{};", statement));
                         }
                         match run(code) {
                             Ok(val) => {
