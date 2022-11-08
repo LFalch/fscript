@@ -84,10 +84,18 @@ Exprs -> Vec<Expr>:
   | { Vec::new() }
   ;
 
+Identifier -> String:
+    'ID' { get_str($lexer, $1) }
+  | 'BOOL' { "bool".to_owned() }
+  | 'UINT' { "uint".to_owned() }
+  | 'INT' { "int".to_owned() }
+  | 'FLOAT' { "float".to_owned() }
+  ;
+
 Expr -> Expr:
     'IF' Expr 'COLON' Expr 'ELSE' Expr 'DOT' { Expr::If(FileSpan::new($lexer, $span), Box::new($2), Box::new($4), Box::new($6)) }
   | 'WHILE' Expr 'COLON' Expr 'DOT' { Expr::While(FileSpan::new($lexer, $span), Box::new($2), Box::new($4)) }
-  | 'ID' 'LPAREN' Exprs 'RPAREN' { Expr::Call(FileSpan::new($lexer, $span), get_str($lexer, $1), $3) }
+  | Identifier 'LPAREN' Exprs 'RPAREN' { Expr::Call(FileSpan::new($lexer, $span), $1, $3) }
   | Expr 'DOT' 'ID' 'LPAREN' Exprs 'RPAREN' { { let mut v = $5; v.insert(0, $1); Expr::Call(FileSpan::new($lexer, $span), get_str($lexer, $3), v) } }
   | Expr 'DOT' 'ID' { Expr::Member(FileSpan::new($lexer, $span), Box::new($1), get_str($lexer, $3)) }
   | Expr 'DOT' 'LBRACK' Expr 'RBRACK' { Expr::Index(FileSpan::new($lexer, $span), Box::new($1), Box::new($4)) }
@@ -112,7 +120,7 @@ Expr -> Expr:
   | Expr 'PIPE' Expr { Expr::Call(FileSpan::new($lexer, $span), "bitor".to_owned(), vec![$1, $3]) }
   | Expr 'OR' Expr { Expr::Call(FileSpan::new($lexer, $span), "or".to_owned(), vec![$1, $3]) }
   | Expr 'AND' Expr { Expr::Call(FileSpan::new($lexer, $span), "and".to_owned(), vec![$1, $3]) }
-  | 'ID' { Expr::Identifer(FileSpan::new($lexer, $span), get_str($lexer, $1)) }
+  | Identifier { Expr::Identifer(FileSpan::new($lexer, $span), $1) }
   | Primitive { Expr::Constant(FileSpan::new($lexer, $span), $1) }
   | 'LBRACK' Exprs 'RBRACK' { Expr::Array(FileSpan::new($lexer, $span), $2) }
   | 'LPAREN' Exprs 'RPAREN' {
