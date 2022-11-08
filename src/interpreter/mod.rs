@@ -418,7 +418,7 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, NoValue> {
             match eval(*expr, env)? {
                 Value::Some(val) => *val,
                 Value::Primitive(LNone) => panic!("Value was None :("),
-                Value::Ref(n) | Value::MutRef(n) => unimplemented!("deref {n}"),
+                Value::Ref(n) | Value::MutRef(n) => env.stack[n].clone(),
                 v => rte!(fl, "Cannot deref value: {:?}", v)
             }
         }

@@ -51,11 +51,32 @@ Vars -> Vars:
 
 Var -> Var:
     'ID' { (get_str($lexer, $1), Type::Inferred) }
-  | 'ID' 'COLON' Type { (get_str($lexer, $1), $3) }
+  | 'ID' 'COLON' Type { (get_str($lexer, $1), Type::Concrete($3)) }
   ;
 
-Type -> Type: { Type::Inferred };
+Type -> ConcreteType:
+    'BOOL' { ConcreteType::Bool }
+  | 'UINT' { ConcreteType::Uint }
+  | 'INT' { ConcreteType::Int }
+  | 'FLOAT' { ConcreteType::Float }
+  | 'QUEST' Type { ConcreteType::Option(Box::new($2)) }
+  | 'AMP' Type { ConcreteType::Reference(Box::new($2)) }
+  | 'LBRACK' Type 'SEMICOLON' 'INT_LITERAL' 'RBRACK' { ConcreteType::Array(Box::new($2), gets($lexer, $4).parse().unwrap()) }
+  | 'LPAREN' Types 'RPAREN' {
+        match $2.len() {
+            0 => ConcreteType::Unit,
+            1 => $2.pop().unwrap(),
+            _ => ConcreteType::Tuple($2)
+        }
+    }
+  | 'FN' 'LPAREN' Types 'RPAREN' 'RET' Type { ConcreteType::Function($3, Box::new($6)) }
+  ;
 
+Types -> Vec<ConcreteType>:
+    Type 'COMMA' Types { {let mut v = $3; v.insert(0, $1); v} }
+  | Type { vec![$1] }
+  | { Vec::new() }
+  ;
 
 Exprs -> Vec<Expr>:
     Expr 'COMMA' Exprs { {let mut v = $3; v.insert(0, $1); v} }
@@ -104,6 +125,7 @@ Expr -> Expr:
   | 'LBRACE' Statements 'RBRACE' { Expr::Block(FileSpan::new($lexer, $span), $2) }
   | 'MINUS' Expr { Expr::Call(FileSpan::new($lexer, $span), "neg".to_owned(), vec![$2]) }
   | 'EXCL' Expr { Expr::Call(FileSpan::new($lexer, $span), "not".to_owned(), vec![$2]) }
+  | 'MUL' Expr { Expr::Deref(FileSpan::new($lexer, $span), Box::new($2)) }
   | 'AMP' Expr { Expr::Ref(FileSpan::new($lexer, $span), Box::new($2)) }
   | 'AT' Expr { Expr::MutRef(FileSpan::new($lexer, $span), Box::new($2)) }
   ;
@@ -120,6 +142,7 @@ Primitive -> Primitive:
 %%
 use crate::source::ast::*;
 use crate::source::FileSpan;
+use crate::types::Type as ConcreteType;
 
 use lrpar::NonStreamingLexer;
 use lrlex::DefaultLexeme;

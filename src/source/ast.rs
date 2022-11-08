@@ -1,11 +1,11 @@
 use super::FileSpan;
 
-use crate::types::Type as TypeType;
+use crate::types::Type as ConcreteType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Inferred,
-    TypeType(TypeType),
+    Concrete(ConcreteType),
 }
 
 pub type Statements = Vec<Statement>;
@@ -52,11 +52,11 @@ impl Expr {
 }
 
 #[derive(Debug, Clone)]
-pub enum Statement {
-    VarAssign(FileSpan, String, Type, Expr),
-    ConstAssign(FileSpan, String, Type, Expr),
+pub enum Statement<T = Type> {
+    VarAssign(FileSpan, String, T, Expr),
+    ConstAssign(FileSpan, String, T, Expr),
     Reassign(FileSpan, String, Expr),
-    Function(FileSpan, String, Vec<(String, Type)>, Expr),
+    Function(FileSpan, String, Vec<(String, T)>, Expr),
     DiscardExpr(Expr),
     Return(FileSpan, Expr),
 }
