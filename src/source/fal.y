@@ -131,7 +131,7 @@ Expr -> Expr:
   ;
 
 Primitive -> Primitive:
-    'INT_LITERAL' { Primitive::Int(gets($lexer, $1).parse().unwrap()) }
+    'INT_LITERAL' { parse_int(gets($lexer, $1)) }
   | 'FLOATING_LITERAL' { Primitive::Float(gets($lexer, $1).parse().unwrap()) }
   | 'TRUE_LITERAL' { Primitive::Bool(true) }
   | 'FALSE_LITERAL' { Primitive::Bool(false) }
@@ -151,6 +151,15 @@ pub type Var = (String, Type);
 pub type Vars = Vec<Var>;
 
 pub type Statements = Vec<Statement>;
+
+fn parse_int(s: &str) -> Primitive {
+    match (s.parse::<u64>(), s.parse::<i64>()) {
+        (Ok(u), Ok(_)) => Primitive::AmbigInt(u),
+        (Ok(u), Err(_)) => Primitive::Uint(u),
+        (Err(_), Ok(i)) => Primitive::Int(i),
+        (Err(_), Err(_)) => unreachable!("could not convert integer literal"),
+    }
+}
 
 fn parse_string_literal(s: &str) -> String {
     let mut ret = String::with_capacity(s.len());
