@@ -1,3 +1,5 @@
+use std::fmt::{self, Display};
+
 use lrlex::lrlex_mod;
 use lrpar::lrpar_mod;
 
@@ -6,7 +8,20 @@ use super::ast::Statements;
 lrlex_mod!("source/fal.l");
 lrpar_mod!("source/fal.y");
 
-pub fn parse(s: &str) -> Option<Statements> {
+pub struct ParseError {
+    inner: Vec<String>,
+}
+
+impl Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for e in &self.inner {
+            writeln!(f, "{e}")?;
+        }
+        Ok(())
+    }
+}
+
+pub fn parse(s: &str) -> Result<Statements, ParseError> {
     let lexerdef = fal_l::lexerdef();
 
     let lexer = lexerdef.lexer(s);
@@ -30,9 +45,18 @@ pub fn parse(s: &str) -> Option<Statements> {
     
     let (res, errs) = fal_y::parse(&lexer);
 
-    for e in errs {
-        eprintln!("{}", e.pp(&lexer, &fal_y::token_epp));
+    let pe = ParseError {
+        inner: errs
+            .into_iter()
+            .map(|e| {
+                e.pp(&lexer, &fal_y::token_epp)
+            })
+            .collect()
+    };
+
+    if !pe.inner.is_empty() {
+        return Err(pe);
     }
 
-    res
+    res.ok_or(pe)
 }

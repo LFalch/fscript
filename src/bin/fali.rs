@@ -17,7 +17,10 @@ fn main() {
             "-R" => show_return = false,
             f => {
                 match parse_source(File::open(f).unwrap()) {
-                    Err(e) => eprintln!("Parser error {f}:{e:?}"),
+                    Err(err) => {
+                        eprintln!("{f}:");
+                        eprintln!("{err}\n");
+                    }
                     Ok(code) => {
                         println!("{f}:");
 
