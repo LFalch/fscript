@@ -17,13 +17,13 @@ fn main() {
             "-R" => show_return = false,
             f => {
                 match parse_source(File::open(f).unwrap()) {
-                    Err(e) => eprintln!("Parser error {f}:{e}"),
+                    Err(e) => eprintln!("Parser error {f}:{e:?}"),
                     Ok(code) => {
                         println!("{f}:");
 
                         if show_tree {
                             println!("AST Program:");
-                            code.iter().for_each(|statement| println!("{:?}", statement));
+                            code.iter().for_each(|statement| println!("\t{};", statement));
                         }
                         match run(code) {
                             Ok(val) => {
