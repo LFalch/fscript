@@ -61,7 +61,7 @@ Type -> ConcreteType:
   | 'FLOAT' { ConcreteType::Float }
   | 'QUEST' Type { ConcreteType::Option(Box::new($2)) }
   | 'AMP' Type { ConcreteType::Reference(Box::new($2)) }
-  | 'LBRACK' Type 'SEMICOLON' 'INT_LITERAL' 'RBRACK' { ConcreteType::Array(Box::new($2), gets($lexer, $4).parse().unwrap()) }
+  | 'LBRACK' Type 'RBRACK' { ConcreteType::Array(Box::new($2)) }
   | 'LPAREN' Types 'RPAREN' {
         match $2.len() {
             0 => ConcreteType::Unit,
