@@ -24,7 +24,7 @@ pub enum Expr {
     Some(Box<Expr>),
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
-    Call(Type, String, Vec<Expr>),
+    Call(ReturnType, String, Vec<Expr>),
     Ref(Box<Expr>),
     MutRef(Box<Expr>),
     Deref(Box<Expr>),
@@ -103,7 +103,7 @@ impl Display for Expr {
                     comma_first = true;
                     write!(f, "{e}")?;
                 }
-                write!(f, " : {t})")
+                write!(f, ") : {t}")
             }
             Ref(e) => write!(f, "&({e})"),
             MutRef(e) => write!(f, "@({e})"),
