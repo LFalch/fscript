@@ -57,9 +57,10 @@ fn main() {
 
                         match type_check(code, functions.clone().into_iter()) {
                             Ok((rt, stmnts)) => {
-                                println!("{:?}", rt);
+                                println!("Return type: {:?}", rt);
+                                println!("Typed code:");
                                 for stmnt in stmnts {
-                                    println!("{stmnt:?}");
+                                    println!("{stmnt}");
                                 }
                             }
                             Err(e) => eprintln!("Type error {f}{e}"),
