@@ -45,16 +45,16 @@ impl RuntimeBuilder {
     pub fn lookup(&self, name: &(String, Type)) -> Pointer {
         self.symbol_table[name]
     }
-    pub fn add_native<S: ToString>(mut self, name: S, args_types: Vec<Type>, ret_type: Type, func: NativeFunction) -> Self {
+    pub fn add_native<S: ToString>(mut self, name: S, arg_type: Type, ret_type: Type, func: NativeFunction) -> Self {
         let p = self.write([255].as_slice());
-        self.symbol_table.insert((name.to_string(), Type::Function(args_types, Box::new(ret_type))), p);
+        self.symbol_table.insert((name.to_string(), Type::Function(Box::new(arg_type), Box::new(ret_type))), p);
         self.native_functions.insert(p, func);
 
         self
     }
-    pub fn add_func<S: ToString>(mut self, name: S, args_types: Vec<Type>, ret_type: Type, inss: &[ins::Instruction]) -> Self {
+    pub fn add_func<S: ToString>(mut self, name: S, arg_type: Type, ret_type: Type, inss: &[ins::Instruction]) -> Self {
         let p = self.write_inss(inss);
-        self.symbol_table.insert((name.to_string(), Type::Function(args_types, Box::new(ret_type))), p);
+        self.symbol_table.insert((name.to_string(), Type::Function(Box::new(arg_type), Box::new(ret_type))), p);
 
         self
     }

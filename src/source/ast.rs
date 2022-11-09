@@ -19,7 +19,7 @@ pub enum Expr {
     Some(FileSpan, Box<Expr>),
     Array(FileSpan, Vec<Expr>),
     Tuple(FileSpan, Vec<Expr>),
-    Call(FileSpan, String, Vec<Expr>),
+    Call(FileSpan, String, Box<Expr>),
     Ref(FileSpan, Box<Expr>),
     MutRef(FileSpan, Box<Expr>),
     Deref(FileSpan, Box<Expr>),
@@ -62,17 +62,12 @@ impl Display for Expr {
                 }
                 write!(f, ")")
             }
-            Call(_, s, exps) => {
-                write!(f, "{s}(")?;
-                let mut comma_first = false;
-                for e in exps {
-                    if comma_first {
-                        write!(f, ", ")?;
-                    }
-                    comma_first = true;
-                    write!(f, "{e}")?;
+            Call(_, s, exp) => {
+                if let Tuple(_, _) | Constant(_, Primitive::Unit) = &**exp {
+                    write!(f, "{s}{exp}")
+                } else {
+                    write!(f, "{s}({exp})")
                 }
-                write!(f, ")")
             }
             Ref(_, e) => write!(f, "&({e})"),
             MutRef(_, e) => write!(f, "@({e})"),

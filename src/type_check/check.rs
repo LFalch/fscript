@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, fmt::{self, Display}};
+use std::{collections::{BTreeMap, HashMap}, fmt::{self, Display}, clone};
 
 use super::ast::*;
 use crate::source::{ast::{Type as TypeHint, Expr as UntypedExpr, Primitive, Statement as UntypedStatement, Statements as UntypedStatements}, FileSpan};
@@ -60,6 +60,7 @@ impl TypeCollection {
             TypeHint::Inferred => self.next(),
             TypeHint::Named(t) => t.into(&mut |_| {
                 let n = self.next;
+                self.map.insert(self.next, Type::TypeVariable(n));
                 self.next += 1;
                 n
             }),
@@ -67,9 +68,10 @@ impl TypeCollection {
     }
     pub fn unify(&mut self, lhs: Type, rhs: Type) -> Option<Type> {
         use self::NamedType::*;
-        match (lhs, rhs) {
+
+        match (self.lookup_by_type(&lhs), self.lookup_by_type(&rhs)) {
             (a, b) if a == b => Some(a),
-            (IntegralVariable(n), IntegralVariable(n2)) | (IntegralVariable(n2), TypeVariable(n)) => {
+            (IntegralVariable(n2) | TypeVariable(n2), IntegralVariable(n)) | (IntegralVariable(n), TypeVariable(n2)) => {
                 let t = self.map[&n].clone();
 
                 *self.map.get_mut(&n2).unwrap() = t.clone();
@@ -114,21 +116,44 @@ impl TypeCollection {
             (Option(t), Option(t2)) => self.unify(*t, *t2).map(|t| Option(Box::new(t))),
             (Reference(t), Reference(t2)) => self.unify(*t, *t2).map(|t| Reference(Box::new(t))),
             (MutReference(t), MutReference(t2)) => self.unify(*t, *t2).map(|t| MutReference(Box::new(t))),
-            (Function(ts, t), Function(ts2, t2)) => {
-                let t = self.unify(*t, *t2)?;
+            (Function(ret, arg), Function(ret2, arg2)) => {
+                let arg = self.unify(*arg, *arg2)?;
+                let ret = self.unify(*ret, *ret2)?;
 
-                if ts.len() != ts2.len() {
-                    return None;
-                }
-                let mut v = Vec::with_capacity(ts.len());
-
-                for (a, b) in ts.into_iter().zip(ts2) {
-                    v.push(self.unify(a, b)?);
-                }
-
-                Some(Function(v, Box::new(t)))
+                Some(Function(Box::new(ret), Box::new(arg)))
             }
             (_, _) => None,
+        }
+    }
+    /// Look for the most specific type equivalent to the given type
+    fn lookup_by_type(&self, t: &Type) -> Type {
+        use self::NamedType::*;
+        match t {
+            TypeVariable(n) | IntegralVariable(n) => self.lookup_type(*n),
+            Array(t) => Array(Box::new(self.lookup_by_type(t))),
+            Option(t) => Option(Box::new(self.lookup_by_type(t))),
+            Reference(t) => Reference(Box::new(self.lookup_by_type(t))),
+            MutReference(t) => MutReference(Box::new(self.lookup_by_type(t))),
+            Tuple(ts) => Tuple(ts.iter().map(|t| self.lookup_by_type(t)).collect()),
+            Function(ret, arg) => Function(Box::new(self.lookup_by_type(ret)), Box::new(self.lookup_by_type(arg))),
+            Unit => Unit,
+            Bool => Bool,
+            Uint => Uint,
+            Int => Int,
+            Float => Float,
+            String => String,
+        }
+    }
+    /// Look up given type variable name in the inner map for its potential more specific type (either more concrete or just the same as another type variable)
+    pub fn lookup_type(&self, name: TypeVariableName) -> Type {
+        match &self.map[&name] {
+            NamedType::TypeVariable(n) | NamedType::IntegralVariable(n) if *n != name => self.lookup_type(*n),
+            t => t.clone(),
+        }
+    }
+    pub fn show(&self) {
+        for (i, t) in &self.map {
+            eprintln!("'{i} :-> {t} :=: {}", self.lookup_type(*i));
         }
     }
 }
@@ -152,7 +177,7 @@ fn returns_in_expr(expr: &Expr) -> Vec<ReturnType> {
         Some(e) => returns_in_expr(e),
         Array(exprs) => exprs.iter().flat_map(returns_in_expr).collect(),
         Tuple(exprs) => exprs.iter().flat_map(returns_in_expr).collect(),
-        Call(_, _, exprs) => exprs.iter().flat_map(returns_in_expr).collect(),
+        Call(_, _, e) => returns_in_expr(e),
         Ref(e) => returns_in_expr(e),
         MutRef(e) => returns_in_expr(e),
         Deref(e) => returns_in_expr(e),
@@ -245,7 +270,13 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                     body_t = tv.unify(body_t, rt).ok_or(error)?;
                 }
 
-                st.insert(name.clone(), (false, Type::Function(arg_types, Box::new(body_t.clone()))));
+                let arg_type = match arg_types.len() {
+                    0 => Type::Unit,
+                    1 => arg_types.pop().unwrap(),
+                    _ => Type::Tuple(arg_types),
+                };
+
+                st.insert(name.clone(), (false, Type::Function(Box::new(arg_type), Box::new(body_t.clone()))));
 
                 typed_stmnts.push(Statement::Function(name, typed_args, body_t, body));
             }
@@ -281,7 +312,11 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
         UntypedExpr::Constant(_, Primitive::None) => (Type::Option(Box::new(tv.next())), Expr::None),
         UntypedExpr::Constant(_, Primitive::String(s)) => (Type::String, Expr::String(s)),
         UntypedExpr::Constant(_, Primitive::Unit) => (Type::Unit, Expr::Unit),
-        UntypedExpr::Identifer(_, ident) => (tv.next(), Expr::Identifer(ident)),
+        UntypedExpr::Identifer(_, ident) => {
+            let t = st.get(&ident).map(|(_, t)| t.clone()).unwrap_or_else(|| tv.next());
+
+            (t, Expr::Identifer(ident))
+        }
         UntypedExpr::Some(_, expr) => {
             let (t, expr) = check_exp(*expr, st, tv)?;
             (Type::Option(Box::new(t)), Expr::Some(Box::new(expr)))
@@ -295,10 +330,17 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             (Type::MutReference(Box::new(t)), Expr::MutRef(Box::new(expr)))
         },
         UntypedExpr::Deref(fs, expr) => {
-            let (t, expr) = check_exp(*expr, st, tv)?;
-            let t = match t {
-                Type::Reference(t) | Type::MutReference(t) => *t,
-                _ => return Err(TypeError::CannotBeDereferenced(fs, t)),
+            let (ref_t, expr) = check_exp(*expr, st, tv)?;
+
+            let t = tv.next();
+            let ref_t_immut = Type::Reference(Box::new(t.clone()));
+            let ref_t_mut = Type::MutReference(Box::new(t));
+
+            let unified_ref_t = tv.unify(ref_t.clone(), ref_t_immut).or_else(|| tv.unify(ref_t.clone(), ref_t_mut));
+
+            let t = match unified_ref_t {
+                Some(Type::Reference(t) | Type::MutReference(t)) => *t,
+                _ => return Err(TypeError::CannotBeDereferenced(fs, ref_t)),
             };
             (t, Expr::Deref(Box::new(expr)))
         }
@@ -325,7 +367,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
                 t = tv.unify(t, t2).ok_or(error)?;
             }
 
-            (t, Expr::Array(typed_arr))
+            (Type::Array(Box::new(t)), Expr::Array(typed_arr))
         },
         UntypedExpr::Tuple(_, exprs) => {
             let mut types = Vec::with_capacity(exprs.len());
@@ -340,40 +382,27 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
 
             (Type::Tuple(types), Expr::Tuple(elements))
         }
-        UntypedExpr::Call(fs, name, args) => {
-            let (_, ft) = st.get(&name).ok_or(TypeError::NoSuchFunction(fs, name.clone()))?;
-            let ft = ft.clone();
+        UntypedExpr::Call(fs, name, arg) => {
+            let ft = st.get(&name).ok_or(TypeError::NoSuchFunction(fs, name.clone()))?.1.clone();
 
-           let (arg_types, rt) = match ft {
-                Type::Function(arg_types, rt) => (arg_types, (*rt).clone()),
+            let (arg_type, rt) = match ft {
+                Type::Function(arg_type, rt) => (*arg_type, *rt),
                 ft => return Err(TypeError::NotAFunction(fs, name.clone(), ft)),
             };
 
-            let mut typed_args = Vec::with_capacity(args.len());
+            let (at, arg) = check_exp(*arg, st, tv)?;
+            let error = TypeError::CouldNotUnifyTypes(fs, at.clone(), arg_type.clone());
+            let _at = tv.unify(at, arg_type).ok_or(error)?;
 
-            for (arg, at) in args.into_iter().zip(arg_types) {
-                let (t, arg) = check_exp(arg, st, tv)?;
-
-                let error = TypeError::CouldNotUnifyTypes(fs, at.clone(), t.clone());
-                let _t = tv.unify(at, t).ok_or(error)?;
-
-                typed_args.push(arg);
-            }
-
-            (rt.clone(), Expr::Call(rt, name, typed_args))
+            (rt.clone(), Expr::Call(rt, name, Box::new(arg)))
         }
         UntypedExpr::Member(fs, array, s) if s == "len" => {
             let (array_t, array) = check_exp(*array, st, tv)?;
 
             let generic_at = Type::Array(Box::new(tv.next()));
-            let array_t = tv.unify(array_t.clone(), generic_at).ok_or(TypeError::LengthOnNonArray(fs, array_t))?;
+            let _array_t = tv.unify(array_t.clone(), generic_at).ok_or(TypeError::LengthOnNonArray(fs, array_t))?;
 
-            let element_t = match array_t {
-                Type::Array(et) => *et,
-                array_t => return Err(TypeError::LengthOnNonArray(fs, array_t)),
-            };
-
-            (Type::Uint, Expr::Member(element_t, Box::new(array), s))
+            (Type::Uint, Expr::Member(Type::Uint, Box::new(array), s))
         }
         UntypedExpr::Member(_, _, _) => todo!(),
         UntypedExpr::Index(_, array, index) => {

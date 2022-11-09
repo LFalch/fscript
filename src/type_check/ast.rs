@@ -24,7 +24,7 @@ pub enum Expr {
     Some(Box<Expr>),
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
-    Call(ReturnType, String, Vec<Expr>),
+    Call(ReturnType, String, Box<Expr>),
     Ref(Box<Expr>),
     MutRef(Box<Expr>),
     Deref(Box<Expr>),
@@ -93,15 +93,11 @@ impl Display for Expr {
                 }
                 write!(f, ")")
             }
-            Call(t, s, exps) => {
-                write!(f, "{s}(")?;
-                let mut comma_first = false;
-                for e in exps {
-                    if comma_first {
-                        write!(f, ", ")?;
-                    }
-                    comma_first = true;
-                    write!(f, "{e}")?;
+            Call(t, s, exp) => {
+                if let Tuple(_) | Unit = &**exp {
+                    write!(f, "{s}{exp}")?;
+                } else {
+                    write!(f, "{s}({exp})")?;
                 }
                 write!(f, ") : {t}")
             }

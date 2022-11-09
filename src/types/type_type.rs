@@ -34,7 +34,8 @@ pub enum Type<V=NoTypeVariable> {
     Option(Box<Type<V>>),
     Reference(Box<Type<V>>),
     MutReference(Box<Type<V>>),
-    Function(Vec<Type<V>>, Box<Type<V>>),
+    /// (args, return type)
+    Function(Box<Type<V>>, Box<Type<V>>),
     String,
 }
 
@@ -78,7 +79,7 @@ impl<V> Type<V> {
             Type::Option(t) => Type::Option(Box::new((*t).into(f))),
             Type::Reference(t) => Type::Reference(Box::new((*t).into(f))),
             Type::MutReference(t) => Type::MutReference(Box::new((*t).into(f))),
-            Type::Function(ts, t) => Type::Function(ts.into_iter().map(|t| t.into(f)).collect(), Box::new((*t).into(f))),
+            Type::Function(a, r) => Type::Function(Box::new((*a).into(f)), Box::new((*r).into(f))),
             Type::String => Type::String,
         }
     }
@@ -92,63 +93,6 @@ pub enum TypeParserError {
     InvalidFunctionArgs,
     UnrecognisedType,
     UnparseableSize(<usize as FromStr>::Err)
-}
-
-impl<V> FromStr for Type<V> {
-    type Err = TypeParserError;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s {
-            "()" => Type::Unit,
-            "int" => Type::Int,
-            "uint" => Type::Uint,
-            "bool" => Type::Bool,
-            "float" => Type::Float,
-            _ if s.starts_with('?') => Type::Option(Box::new(Self::from_str(&s[1..])?)),
-            _ if s.starts_with('&') => Type::Reference(Box::new(Self::from_str(&s[1..])?)),
-            _ if s.starts_with('[') => {
-                if !s.ends_with(']') {
-                    return Err(TypeParserError::ArrayNoEndBracket)
-                }
-                Type::Array(Box::new(Self::from_str(&s[1..s.len()-1])?))
-            }
-            _ if s.starts_with('(') => {
-                if !s.ends_with(')') {
-                    return Err(TypeParserError::TupleNoEndBracket)
-                }
-                let s = &s[1..s.len()-1];
-
-                if s == "," {
-                    return Ok(Type::Tuple(vec![]))
-                }
-
-                let mut split = s.split(',');
-                let mut ts = Vec::with_capacity(split.size_hint().0);
-
-                let back = split.next_back().and_then(|b| if b.is_empty() {
-                    None
-                } else { Some(b) });
-
-                for t in split.chain(back) {
-                    ts.push(Self::from_str(t)?);
-                }
-                Type::Tuple(ts)
-            }
-            _ if s.starts_with("fn") => {
-                let s = &s[2..];
-                let (ret, end_i) =  if let Some(ret_i) = s.find("->") {
-                    (Self::from_str(&s[ret_i+2..])?, ret_i)
-                } else {
-                    (Type::Unit, s.len())
-                };
-                match Self::from_str(&s[..end_i])? {
-                    Type::Unit => Type::Function(vec![], Box::new(ret)),
-                    Type::Tuple(ts) => Type::Function(ts, Box::new(ret)),
-                    _ => return Err(TypeParserError::InvalidFunctionArgs),
-                }
-            }
-            _ => return Err(TypeParserError::UnrecognisedType),
-        })
-    }
 }
 
 impl<V: Display> Display for Type<V> {
@@ -191,7 +135,10 @@ impl<V: Display> Display for Type<V> {
             Reference(ref t) => write!(f, "&{}", t),
             MutReference(ref t) => write!(f, "@{}", t),
             Function(ref args, ref ret) => {
-                write!(f, "fn{}->{}", TupleType(args), ret)
+                match &**args {
+                    Tuple(_) | Unit => write!(f, "fn{}->{}", args, ret),
+                    _ => write!(f, "fn({})->{}", args, ret),
+                }
             }
             String => "str".fmt(f),
             TypeVariable(ref c) => write!(f, "'{c}"),

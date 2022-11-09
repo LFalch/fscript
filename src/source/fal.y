@@ -59,17 +59,21 @@ Type -> NamedType:
   | 'UINT' { NamedType::Uint }
   | 'INT' { NamedType::Int }
   | 'FLOAT' { NamedType::Float }
+  | 'STRING' { NamedType::String }
   | 'QUEST' Type { NamedType::Option(Box::new($2)) }
   | 'AMP' Type { NamedType::Reference(Box::new($2)) }
   | 'LBRACK' Type 'RBRACK' { NamedType::Array(Box::new($2)) }
-  | 'LPAREN' Types 'RPAREN' {
+  | 'FN' TupleType 'RET' Type { NamedType::Function(Box::new($2), Box::new($4)) }
+  ;
+
+TupleType -> NamedType:
+   'LPAREN' Types 'RPAREN' {
         match $2.len() {
             0 => NamedType::Unit,
             1 => $2.pop().unwrap(),
             _ => NamedType::Tuple($2)
         }
     }
-  | 'FN' 'LPAREN' Types 'RPAREN' 'RET' Type { NamedType::Function($3, Box::new($6)) }
   ;
 
 Types -> Vec<NamedType>:
@@ -90,52 +94,64 @@ Identifier -> String:
   | 'UINT' { "uint".to_owned() }
   | 'INT' { "int".to_owned() }
   | 'FLOAT' { "float".to_owned() }
+  | 'STRING' { "string".to_owned() }
   ;
 
 Expr -> Expr:
     'IF' Expr 'COLON' Expr 'ELSE' Expr 'DOT' { Expr::If(FileSpan::new($lexer, $span), Box::new($2), Box::new($4), Box::new($6)) }
   | 'WHILE' Expr 'COLON' Expr 'DOT' { Expr::While(FileSpan::new($lexer, $span), Box::new($2), Box::new($4)) }
-  | Identifier 'LPAREN' Exprs 'RPAREN' { Expr::Call(FileSpan::new($lexer, $span), $1, $3) }
-  | Expr 'DOT' 'ID' 'LPAREN' Exprs 'RPAREN' { { let mut v = $5; v.insert(0, $1); Expr::Call(FileSpan::new($lexer, $span), get_str($lexer, $3), v) } }
+  | Identifier Tuple { Expr::Call(FileSpan::new($lexer, $span), $1, Box::new($2)) }
+  | Expr 'DOT' 'ID' 'LPAREN' Exprs 'RPAREN' { {
+        let mut v = $5;
+        v.insert(0, $1);
+
+        let args_fs = FileSpan::from_lexeme($lexer, $4).ended_by(FileSpan::from_lexeme($lexer, $6));
+
+        Expr::Call(FileSpan::new($lexer, $span), get_str($lexer, $3), Box::new(Expr::Tuple(args_fs, v)))
+    } }
   | Expr 'DOT' 'ID' { Expr::Member(FileSpan::new($lexer, $span), Box::new($1), get_str($lexer, $3)) }
   | Expr 'DOT' 'LBRACK' Expr 'RBRACK' { Expr::Index(FileSpan::new($lexer, $span), Box::new($1), Box::new($4)) }
   | 'SOME' 'LPAREN' Expr 'RPAREN' { Expr::Some(FileSpan::new($lexer, $span), Box::new($3)) }
-  | Expr 'PLUS' Expr { Expr::Call(FileSpan::new($lexer, $span), "add".to_owned(), vec![$1, $3]) }
-  | Expr 'MINUS' Expr { Expr::Call(FileSpan::new($lexer, $span), "sub".to_owned(), vec![$1, $3]) }
-  | Expr 'MUL' Expr { Expr::Call(FileSpan::new($lexer, $span), "mul".to_owned(), vec![$1, $3]) }
-  | Expr 'DIV' Expr { Expr::Call(FileSpan::new($lexer, $span), "div".to_owned(), vec![$1, $3]) }
-  | Expr 'MOD' Expr { Expr::Call(FileSpan::new($lexer, $span), "rem".to_owned(), vec![$1, $3]) }
-  | Expr 'CONCAT' Expr { Expr::Call(FileSpan::new($lexer, $span), "concat".to_owned(), vec![$1, $3]) }
-  | Expr 'POW' Expr { Expr::Call(FileSpan::new($lexer, $span), "pow".to_owned(), vec![$1, $3]) }
-  | Expr 'EQT' Expr { Expr::Call(FileSpan::new($lexer, $span), "eq".to_owned(), vec![$1, $3]) }
-  | Expr 'NEQ' Expr { Expr::Call(FileSpan::new($lexer, $span), "neq".to_owned(), vec![$1, $3]) }
-  | Expr 'GT' Expr { Expr::Call(FileSpan::new($lexer, $span), "gt".to_owned(), vec![$1, $3]) }
-  | Expr 'GTE' Expr { Expr::Call(FileSpan::new($lexer, $span), "gte".to_owned(), vec![$1, $3]) }
-  | Expr 'LT' Expr { Expr::Call(FileSpan::new($lexer, $span), "lt".to_owned(), vec![$1, $3]) }
-  | Expr 'LTE' Expr { Expr::Call(FileSpan::new($lexer, $span), "lte".to_owned(), vec![$1, $3]) }
-  | Expr 'SHL' Expr { Expr::Call(FileSpan::new($lexer, $span), "shl".to_owned(), vec![$1, $3]) }
-  | Expr 'SHR' Expr { Expr::Call(FileSpan::new($lexer, $span), "shr".to_owned(), vec![$1, $3]) }
-  | Expr 'AMP' Expr { Expr::Call(FileSpan::new($lexer, $span), "bitand".to_owned(), vec![$1, $3]) }
-  | Expr 'HAT' Expr { Expr::Call(FileSpan::new($lexer, $span), "xor".to_owned(), vec![$1, $3]) }
-  | Expr 'PIPE' Expr { Expr::Call(FileSpan::new($lexer, $span), "bitor".to_owned(), vec![$1, $3]) }
-  | Expr 'OR' Expr { Expr::Call(FileSpan::new($lexer, $span), "or".to_owned(), vec![$1, $3]) }
-  | Expr 'AND' Expr { Expr::Call(FileSpan::new($lexer, $span), "and".to_owned(), vec![$1, $3]) }
+  | Expr 'PLUS' Expr { binop($lexer, $span, "add", $1, $3) }
+  | Expr 'MINUS' Expr { binop($lexer, $span, "sub", $1, $3) }
+  | Expr 'MUL' Expr { binop($lexer, $span, "mul", $1, $3) }
+  | Expr 'DIV' Expr { binop($lexer, $span, "div", $1, $3) }
+  | Expr 'MOD' Expr { binop($lexer, $span, "rem", $1, $3) }
+  | Expr 'CONCAT' Expr { binop($lexer, $span, "concat", $1, $3) }
+  | Expr 'POW' Expr { binop($lexer, $span, "pow", $1, $3) }
+  | Expr 'EQT' Expr { binop($lexer, $span, "eq", $1, $3) }
+  | Expr 'NEQ' Expr { binop($lexer, $span, "neq", $1, $3) }
+  | Expr 'GT' Expr { binop($lexer, $span, "gt", $1, $3) }
+  | Expr 'GTE' Expr { binop($lexer, $span, "gte", $1, $3) }
+  | Expr 'LT' Expr { binop($lexer, $span, "lt", $1, $3) }
+  | Expr 'LTE' Expr { binop($lexer, $span, "lte", $1, $3) }
+  | Expr 'SHL' Expr { binop($lexer, $span, "shl", $1, $3) }
+  | Expr 'SHR' Expr { binop($lexer, $span, "shr", $1, $3) }
+  | Expr 'AMP' Expr { binop($lexer, $span, "bitand", $1, $3) }
+  | Expr 'HAT' Expr { binop($lexer, $span, "xor", $1, $3) }
+  | Expr 'PIPE' Expr { binop($lexer, $span, "bitor", $1, $3) }
+  | Expr 'OR' Expr { binop($lexer, $span, "or", $1, $3) }
+  | Expr 'AND' Expr { binop($lexer, $span, "and", $1, $3) }
   | Identifier { Expr::Identifer(FileSpan::new($lexer, $span), $1) }
   | Primitive { Expr::Constant(FileSpan::new($lexer, $span), $1) }
   | 'LBRACK' Exprs 'RBRACK' { Expr::Array(FileSpan::new($lexer, $span), $2) }
-  | 'LPAREN' Exprs 'RPAREN' {
+  | Tuple { $1 }
+  | 'LBRACE' Statements 'RBRACE' { Expr::Block(FileSpan::new($lexer, $span), $2) }
+  | 'MINUS' Expr { Expr::Call(FileSpan::new($lexer, $span), "neg".to_owned(), Box::new($2)) }
+  | 'EXCL' Expr { Expr::Call(FileSpan::new($lexer, $span), "not".to_owned(), Box::new($2)) }
+  | 'MUL' Expr { Expr::Deref(FileSpan::new($lexer, $span), Box::new($2)) }
+  | 'AMP' Expr { Expr::Ref(FileSpan::new($lexer, $span), Box::new($2)) }
+  | 'AT' Expr { Expr::MutRef(FileSpan::new($lexer, $span), Box::new($2)) }
+  ;
+
+Tuple -> Expr:
+  'LPAREN' Exprs 'RPAREN' {
         match $2.len() {
             0 => Expr::Constant(FileSpan::new($lexer, $span), Primitive::Unit),
             1 => $2.pop().unwrap(),
             _ => Expr::Tuple(FileSpan::new($lexer, $span), $2)
         }
     }
-  | 'LBRACE' Statements 'RBRACE' { Expr::Block(FileSpan::new($lexer, $span), $2) }
-  | 'MINUS' Expr { Expr::Call(FileSpan::new($lexer, $span), "neg".to_owned(), vec![$2]) }
-  | 'EXCL' Expr { Expr::Call(FileSpan::new($lexer, $span), "not".to_owned(), vec![$2]) }
-  | 'MUL' Expr { Expr::Deref(FileSpan::new($lexer, $span), Box::new($2)) }
-  | 'AMP' Expr { Expr::Ref(FileSpan::new($lexer, $span), Box::new($2)) }
-  | 'AT' Expr { Expr::MutRef(FileSpan::new($lexer, $span), Box::new($2)) }
   ;
 
 Primitive -> Primitive:
@@ -152,13 +168,18 @@ use crate::source::ast::*;
 use crate::source::FileSpan;
 use crate::types::Type as NamedType;
 
-use lrpar::NonStreamingLexer;
+use lrpar::{NonStreamingLexer, Span};
 use lrlex::DefaultLexeme;
 
 pub type Var = (String, Type);
 pub type Vars = Vec<Var>;
 
 pub type Statements = Vec<Statement>;
+
+fn binop(lexer: &dyn NonStreamingLexer<DefaultLexeme, u32>, span: Span, binop: &str, a: Expr, b: Expr) -> Expr {
+    let fs = FileSpan::new(lexer, span);
+    Expr::Call(fs, binop.to_owned(), Box::new(Expr::Tuple(fs, vec![a, b])))
+}
 
 fn parse_int(s: &str) -> Primitive {
     match (s.parse::<u64>(), s.parse::<i64>()) {

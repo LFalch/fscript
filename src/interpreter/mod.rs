@@ -31,7 +31,12 @@ pub enum Function {
 }
 
 impl Function {
-    fn call(self, args: Vec<Value>, env: &mut Enviroment) -> Result<Value, RuntimeError> {
+    fn call(self, arg: Value, env: &mut Enviroment) -> Result<Value, RuntimeError> {
+        let args = match arg {
+            Value::Tuple(v) => v,
+            Value::Primitive(Unit) => Vec::new(),
+            v => vec![v],
+        };
         match self {
             Function::Implemented(arg_names, fn_sym_tab, body) => {
                 let Enviroment { stack, .. } = env;
@@ -384,16 +389,14 @@ fn eval(expr: Expr, env: &mut Enviroment<'_>) -> Result<Value, NoValue> {
         }
         Expr::Array(_fl, vec) => Value::Array(vec.into_iter().map(|expr| eval(expr, env)).collect_result()?),
         Expr::Tuple(_fl, vec) => Value::Tuple(vec.into_iter().map(|expr| eval(expr, env)).collect_result()?),
-        Expr::Call(fl, func, arg_exprs) => {
+        Expr::Call(fl, func, arg_expr) => {
             let f = match env.get(&func) {
                 Some(Value::Function(f)) => f,
                 Some(_) => rte!(fl, "{} is not a function", func),
                 None => rte!(fl, "no such function {}", func),
             }.clone();
 
-            let exprs: Vec<_> = arg_exprs.into_iter().map(|expr| eval(expr, env)).collect_result()?;
-
-            f.call(exprs, env)?
+            f.call(eval(*arg_expr, env)?, env)?
         }
         Expr::Ref(_fl, expr) => match *expr {
             Expr::Identifer(fl, s) => Value::Ref(env.get_index(&s).ok_or_else(|| RuntimeError::new(fl, "no value bound to name"))?.1),
