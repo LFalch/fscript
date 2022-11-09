@@ -323,13 +323,19 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
 
         match statement {
             Statement::DiscardExpr(expr) => eval = eval!(expr, env),
-            Statement::ConstAssign(_, ident, Type::Inferred, expr) => {
+            Statement::ConstAssign(_, ident, t, expr) => {
                 let val = eval!(expr, env);
                 env.add_const(ident, val);
+                if !t.is_inferred() {
+                    eprintln!("warning: type annotations are ignored in interpreter mode")
+                }
             }
-            Statement::VarAssign(_, ident, Type::Inferred, expr) => {
+            Statement::VarAssign(_, ident, t, expr) => {
                 let val = eval!(expr, env);
                 env.add_var(ident, val);
+                if !t.is_inferred() {
+                    eprintln!("warning: type annotations are ignored in interpreter mode")
+                }
             }
             Statement::Reassign(_, ident, expr) => {
                 let val = eval!(expr, env);
@@ -347,7 +353,6 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
                     expr => vec![Statement::Return(expr.file_span(), expr)],
                 }));
             }
-            Statement::ConstAssign(_, _, _, _) | Statement::VarAssign(_, _, _, _) => unimplemented!(),
             Statement::Return(_, expr) => return Ok(StatementsOk::Return(eval!(expr, env))),
         }
 

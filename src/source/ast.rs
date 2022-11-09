@@ -10,6 +10,12 @@ pub enum Type {
     Named(NamedType),
 }
 
+impl Type {
+    pub fn is_inferred(&self) -> bool {
+        matches!(self, Type::Inferred)
+    }
+}
+
 pub type Statements = Vec<Statement>;
 
 #[derive(Debug, Clone)]

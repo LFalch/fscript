@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, fmt::{self, Display}, clone};
+use std::{collections::{BTreeMap, HashMap}, fmt::{self, Display}};
 
 use super::ast::*;
 use crate::source::{ast::{Type as TypeHint, Expr as UntypedExpr, Primitive, Statement as UntypedStatement, Statements as UntypedStatements}, FileSpan};
