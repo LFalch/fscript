@@ -18,6 +18,27 @@ pub enum TypeError {
     ConditionNotBoolean(FileSpan, Type),
 }
 
+trait TypeResultExtension {
+    fn fs(self, fs: FileSpan) -> Self;
+}
+
+impl<T> TypeResultExtension for Result<T, TypeError> {
+    fn fs(self, fs: FileSpan) -> Self {
+        match self {
+            Err(TypeError::CannotBeDereferenced(_, t)) => Err(TypeError::CannotBeDereferenced(fs, t)),
+            Err(TypeError::CouldNotUnifyTypes(_, t, t2)) => Err(TypeError::CouldNotUnifyTypes(fs, t, t2)),
+            Err(TypeError::NoSuchVariable(_, s)) => Err(TypeError::NoSuchVariable(fs, s)),
+            Err(TypeError::NotMutable(_, s)) => Err(TypeError::NotMutable(fs, s)),
+            Err(TypeError::NoSuchFunction(_, s)) => Err(TypeError::NoSuchFunction(fs, s)),
+            Err(TypeError::NotAFunction(_, s, t)) => Err(TypeError::NotAFunction(fs, s, t)),
+            Err(TypeError::IncorrectIndexing(_, t, t2)) => Err(TypeError::IncorrectIndexing(fs, t, t2)),
+            Err(TypeError::LengthOnNonArray(_, t)) => Err(TypeError::LengthOnNonArray(fs, t)),
+            Err(TypeError::ConditionNotBoolean(_, t)) => Err(TypeError::ConditionNotBoolean(fs, t)),
+            a @ Ok(_) => a,
+        }
+    }
+}
+
 impl Display for TypeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -34,6 +55,7 @@ impl Display for TypeError {
     }
 }
 
+#[derive(Debug)]
 pub struct TypeCollection {
     next: TypeVariableName,
     map: BTreeMap<TypeVariableName, Type>,
@@ -66,52 +88,49 @@ impl TypeCollection {
             }),
         }
     }
-    pub fn unify(&mut self, lhs: Type, rhs: Type) -> Option<Type> {
+    pub fn unify(&mut self, lhs: Type, rhs: Type) -> Result<Type, TypeError> {
         use self::NamedType::*;
 
         match (self.lookup_by_type(&lhs), self.lookup_by_type(&rhs)) {
-            (a, b) if a == b => Some(a),
+            (a, b) if a == b => Ok(a),
             (IntegralVariable(n2) | TypeVariable(n2), IntegralVariable(n)) | (IntegralVariable(n), TypeVariable(n2)) => {
                 let t = self.map[&n].clone();
 
                 *self.map.get_mut(&n2).unwrap() = t.clone();
 
-                Some(t)
+                Ok(t)
             }
             (TypeVariable(n), TypeVariable(n2)) => {
                 let t = self.map[&n].clone();
 
                 *self.map.get_mut(&n2).unwrap() = t.clone();
 
-                Some(t)
+                Ok(t)
             }
-            (TypeVariable(n), t) | (t, Type::TypeVariable(n)) => {
+            (TypeVariable(n), t) | (t, TypeVariable(n)) => {
                 *self.map.get_mut(&n).unwrap() = t.clone();
 
-                Some(t)
+                Ok(t)
             },
             (IntegralVariable(n), Int) | (Int, IntegralVariable(n)) => {
                 *self.map.get_mut(&n).unwrap() = Int;
 
-                Some(Int)
+                Ok(Int)
             }
             (IntegralVariable(n), Uint) | (Uint, IntegralVariable(n)) => {
                 *self.map.get_mut(&n).unwrap() = Uint;
 
-                Some(Uint)
+                Ok(Uint)
             }
             (Array(t), Array(t2)) => self.unify(*t, *t2).map(|t| Array(Box::new(t))),
-            (Tuple(ts), Tuple(ts2)) => {
-                if ts.len() != ts2.len() {
-                    return None;
-                }
+            (Tuple(ts), Tuple(ts2)) if ts.len() == ts2.len() => {
                 let mut v = Vec::with_capacity(ts.len());
 
                 for (a, b) in ts.into_iter().zip(ts2) {
                     v.push(self.unify(a, b)?);
                 }
 
-                Some(Tuple(v))
+                Ok(Tuple(v))
             }
             (Option(t), Option(t2)) => self.unify(*t, *t2).map(|t| Option(Box::new(t))),
             (Reference(t), Reference(t2)) => self.unify(*t, *t2).map(|t| Reference(Box::new(t))),
@@ -120,9 +139,9 @@ impl TypeCollection {
                 let arg = self.unify(*arg, *arg2)?;
                 let ret = self.unify(*ret, *ret2)?;
 
-                Some(Function(Box::new(ret), Box::new(arg)))
+                Ok(Function(Box::new(ret), Box::new(arg)))
             }
-            (_, _) => None,
+            (a, b) => Err(TypeError::CouldNotUnifyTypes(FileSpan::dud(), a, b)),
         }
     }
     /// Look for the most specific type equivalent to the given type
@@ -213,8 +232,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let t = tv.convert(t);
                 let fs = e.file_span();
                 let (te, e) = check_exp(e, st, tv)?;
-                let error = TypeError::CouldNotUnifyTypes(fs, t.clone(), te.clone());
-                let t = tv.unify(t, te).ok_or(error)?;
+                let t = tv.unify(t, te).fs(fs)?;
 
                 st.insert(ident.clone(), (true, t.clone()));
 
@@ -224,8 +242,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let t = tv.convert(t);
                 let fs = e.file_span();
                 let (te, e) = check_exp(e, st, tv)?;
-                let error = TypeError::CouldNotUnifyTypes(fs, t.clone(), te.clone());
-                let t = tv.unify(t, te).ok_or(error)?;
+                let t = tv.unify(t, te).fs(fs)?;
 
                 st.insert(ident.clone(), (false, t.clone()));
 
@@ -240,8 +257,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                     Some((true, t)) => t.clone(),
                 };
 
-                let error = TypeError::CouldNotUnifyTypes(fs, t.clone(), te.clone());
-                let _t = tv.unify(t, te).ok_or(error)?;
+                let _t = tv.unify(t, te).fs(fs)?;
 
                 typed_stmnts.push(Statement::Reassign(ident, e));
             }
@@ -266,8 +282,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 }
                 
                 for rt in returns_in_expr(&body) {
-                    let error = TypeError::CouldNotUnifyTypes(fs, body_t.clone(), rt.clone());
-                    body_t = tv.unify(body_t, rt).ok_or(error)?;
+                    body_t = tv.unify(body_t, rt).fs(fs)?;
                 }
 
                 let arg_type = match arg_types.len() {
@@ -294,9 +309,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
 
     let mut rt = tv.next();
     for rt_cand in typed_stmnts.iter().flat_map(returns) {
-        let err = TypeError::CouldNotUnifyTypes(FileSpan::dud(), rt.clone(), rt_cand.clone());
-
-        rt = tv.unify(rt, rt_cand).ok_or(err)?;
+        rt = tv.unify(rt, rt_cand)?;
     }
 
     Ok((rt, typed_stmnts))
@@ -336,10 +349,10 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let ref_t_immut = Type::Reference(Box::new(t.clone()));
             let ref_t_mut = Type::MutReference(Box::new(t));
 
-            let unified_ref_t = tv.unify(ref_t.clone(), ref_t_immut).or_else(|| tv.unify(ref_t.clone(), ref_t_mut));
+            let unified_ref_t = tv.unify(ref_t.clone(), ref_t_immut).or_else(|_| tv.unify(ref_t.clone(), ref_t_mut));
 
             let t = match unified_ref_t {
-                Some(Type::Reference(t) | Type::MutReference(t)) => *t,
+                Ok(Type::Reference(t) | Type::MutReference(t)) => *t,
                 _ => return Err(TypeError::CannotBeDereferenced(fs, ref_t)),
             };
             (t, Expr::Deref(Box::new(expr)))
@@ -362,9 +375,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
                 let (t2, e) = check_exp(expr, st, tv)?;
                 typed_arr.push(e);
 
-                let error = TypeError::CouldNotUnifyTypes(fs, t.clone(), t2.clone());
-
-                t = tv.unify(t, t2).ok_or(error)?;
+                t = tv.unify(t, t2).fs(fs)?;
             }
 
             (Type::Array(Box::new(t)), Expr::Array(typed_arr))
@@ -391,8 +402,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             };
 
             let (at, arg) = check_exp(*arg, st, tv)?;
-            let error = TypeError::CouldNotUnifyTypes(fs, at.clone(), arg_type.clone());
-            let _at = tv.unify(at, arg_type).ok_or(error)?;
+            let _at = tv.unify(at, arg_type).fs(fs)?;
 
             (rt.clone(), Expr::Call(rt, name, Box::new(arg)))
         }
@@ -400,7 +410,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (array_t, array) = check_exp(*array, st, tv)?;
 
             let generic_at = Type::Array(Box::new(tv.next()));
-            let _array_t = tv.unify(array_t.clone(), generic_at).ok_or(TypeError::LengthOnNonArray(fs, array_t))?;
+            let _array_t = tv.unify(array_t.clone(), generic_at).map_err(|_| TypeError::LengthOnNonArray(fs, array_t))?;
 
             (Type::Uint, Expr::Member(Type::Uint, Box::new(array), s))
         }
@@ -413,8 +423,8 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (index_t, index) = check_exp(*index, st, tv)?;
 
             let generic_at = Type::Array(Box::new(tv.next()));
-            let array_t = tv.unify(array_t.clone(), generic_at.clone()).ok_or(TypeError::CouldNotUnifyTypes(array_fs, array_t, generic_at))?;
-            let index_t = tv.unify(index_t.clone(), Type::Uint).ok_or(TypeError::CouldNotUnifyTypes(index_fs, index_t, Type::Uint))?;
+            let array_t = tv.unify(array_t.clone(), generic_at.clone()).fs(array_fs)?;
+            let index_t = tv.unify(index_t.clone(), Type::Uint).fs(index_fs)?;
 
             let element_t = match (array_t, index_t) {
                 (Type::Array(et), Type::Uint) => et,
@@ -429,10 +439,9 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (true_t, if_true) = check_exp(*if_true, st, tv)?;
             let (false_t, if_false) = check_exp(*if_false, st, tv)?;
 
-            tv.unify(bool_t.clone(), Type::Bool).ok_or(TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
+            tv.unify(bool_t.clone(), Type::Bool).map_err(|_| TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
 
-            let error = TypeError::CouldNotUnifyTypes(fs, true_t.clone(), false_t.clone());
-            let t = tv.unify(true_t, false_t).ok_or(error)?;
+            let t = tv.unify(true_t, false_t).fs(fs)?;
 
             (t, Expr::If(Box::new(cond), Box::new(if_true), Box::new(if_false)))
         }
@@ -441,7 +450,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (bool_t, cond) = check_exp(*cond, st, tv)?;
             let (_body_t, body) = check_exp(*body, st, tv)?;
 
-            tv.unify(bool_t.clone(), Type::Bool).ok_or(TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
+            tv.unify(bool_t.clone(), Type::Bool).map_err(|_| TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
 
             (Type::Unit, Expr::While(Box::new(cond), Box::new(body)))
         }
