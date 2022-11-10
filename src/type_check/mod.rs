@@ -1,11 +1,13 @@
 pub mod ast;
 pub mod check;
+pub mod state;
 
 use crate::source::ast::Statements as SourceStatements;
 use crate::source::ast::Type as TypeHint;
 use crate::types::Type;
 use self::ast::{Statements as TypedStatements, Statement as TypedStatement, Expr, Type as ProperType};
-use self::check::{check_statements, SymbolTable, TypeCollection, ReturnType, TypeError};
+use self::check::{check_statements, ReturnType, TypeError};
+use self::state::{SymbolTable, TypeCollection};
 
 pub fn type_check(stmnts: SourceStatements, function_table: impl IntoIterator<Item=(String, (Type, Type))>) -> Result<(ReturnType, TypedStatements), TypeError> {
     let mut st = SymbolTable::new();
