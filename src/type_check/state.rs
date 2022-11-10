@@ -155,4 +155,20 @@ impl TypeCollection {
     }
 }
 
-pub type SymbolTable = HashMap<String, (bool, Type)>;
+#[derive(Debug, Clone)]
+pub struct SymbolTable {
+    inner: HashMap<String, (bool, Type)>
+}
+
+impl SymbolTable {
+    pub fn new() -> Self {
+        SymbolTable { inner: HashMap::new() }
+    }
+    pub fn add<S: ToString + AsRef<str>>(&mut self, s: S, mutable: bool, t: Type) {
+        // TODO: handle function overloading
+        self.inner.insert(s.to_string(), (mutable, t));
+    }
+    pub fn get(&self, s: &str) -> Option<&(bool, Type)> {
+        self.inner.get(s)
+    }
+}

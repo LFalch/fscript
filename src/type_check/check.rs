@@ -122,7 +122,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let (te, e) = check_exp(e, st, tv)?;
                 let t = tv.unify(t, te).fs(fs)?;
 
-                st.insert(ident.clone(), (true, t.clone()));
+                st.add(ident.clone(), true, t.clone());
 
                 typed_stmnts.push(Statement::VarAssign(ident, t, e));
             }
@@ -132,7 +132,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let (te, e) = check_exp(e, st, tv)?;
                 let t = tv.unify(t, te).fs(fs)?;
 
-                st.insert(ident.clone(), (false, t.clone()));
+                st.add(ident.clone(), false, t.clone());
 
                 typed_stmnts.push(Statement::ConstAssign(ident, t, e));
             }
@@ -159,7 +159,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                     let arg_type = tv.convert(arg_type);
                     arg_types.push(arg_type.clone());
                     typed_args.push((arg_name.clone(), arg_type.clone()));
-                    body_st.insert(arg_name, (true, arg_type));
+                    body_st.add(arg_name, true, arg_type);
                 }
 
                 let (mut body_t, body) = check_exp(body, &mut body_st, tv)?;
@@ -179,7 +179,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                     _ => Type::Tuple(arg_types),
                 };
 
-                st.insert(name.clone(), (false, Type::Function(Box::new(arg_type), Box::new(body_t.clone()))));
+                st.add(name.clone(), false, Type::Function(Box::new(arg_type), Box::new(body_t.clone())));
 
                 typed_stmnts.push(Statement::Function(name, typed_args, body_t, body));
             }

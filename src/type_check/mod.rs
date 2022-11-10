@@ -15,7 +15,7 @@ pub fn type_check(stmnts: SourceStatements, function_table: impl IntoIterator<It
     let mut tv = TypeCollection::new();
 
     for (n, (arg_type, ret_type)) in function_table {
-        st.insert(n, (false, tv.convert(TypeHint::Named(Type::Function(Box::new(arg_type), Box::new(ret_type))))));
+        st.add(n, false, tv.convert(TypeHint::Named(Type::Function(Box::new(arg_type), Box::new(ret_type)))));
     }
 
     check_statements(stmnts, &mut st, &mut tv).map(|r| type_specifier(r, &mut tv))
