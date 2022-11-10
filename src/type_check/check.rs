@@ -145,7 +145,7 @@ impl TypeCollection {
         }
     }
     /// Look for the most specific type equivalent to the given type
-    fn lookup_by_type(&self, t: &Type) -> Type {
+    pub fn lookup_by_type(&self, t: &Type) -> Type {
         use self::NamedType::*;
         match t {
             TypeVariable(n) | IntegralVariable(n) => self.lookup_type(*n),
@@ -164,7 +164,7 @@ impl TypeCollection {
         }
     }
     /// Look up given type variable name in the inner map for its potential more specific type (either more concrete or just the same as another type variable)
-    pub fn lookup_type(&self, name: TypeVariableName) -> Type {
+    fn lookup_type(&self, name: TypeVariableName) -> Type {
         match &self.map[&name] {
             NamedType::TypeVariable(n) | NamedType::IntegralVariable(n) if *n != name => self.lookup_type(*n),
             t => t.clone(),
