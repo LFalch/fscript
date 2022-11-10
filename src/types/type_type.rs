@@ -21,8 +21,7 @@ impl Display for NoTypeVariable {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type<V=NoTypeVariable> {
-    TypeVariable(V),
-    IntegralVariable(V),
+    TypeVariable(V, Vec<Type<V>>),
     Unit,
     Bool,
     Uint,
@@ -40,11 +39,18 @@ pub enum Type<V=NoTypeVariable> {
 }
 
 impl<V> Type<V> {
+    pub const fn type_variable(v: V) -> Self {
+        Type::TypeVariable(v, Vec::new())
+    }
+    pub fn int_variable(v: V) -> Self {
+        Type::TypeVariable(v, vec![Self::Int, Self::Uint])
+    }
     #[inline]
     pub fn size(&self) -> usize {
         use Type::*;
         match *self {
-            TypeVariable(_) | IntegralVariable(_) => panic!("not concrete"),
+            // TODO: maybe show size if all possibilities are the same
+            TypeVariable(_, _) => panic!("not concrete"),
             Unit => size_of::<t::Unit>(),
             Bool => size_of::<t::Bool>(),
             Uint => size_of::<t::Uint>(),
@@ -67,8 +73,7 @@ impl<V> Type<V> {
     }
     pub fn into<V2, F: FnMut(V) -> V2>(self, f: &mut F) -> Type<V2> {
         match self {
-            Type::TypeVariable(v) => Type::TypeVariable(f(v)),
-            Type::IntegralVariable(v) => Type::IntegralVariable(f(v)),
+            Type::TypeVariable(v, ts) => Type::TypeVariable(f(v), ts.into_iter().map(|t| t.into(f)).collect()),
             Type::Unit => Type::Unit,
             Type::Bool => Type::Bool,
             Type::Uint => Type::Uint,
@@ -141,8 +146,23 @@ impl<V: Display> Display for Type<V> {
                 }
             }
             String => "str".fmt(f),
-            TypeVariable(ref c) => write!(f, "'{c}"),
-            IntegralVariable(ref c) => write!(f, "int('{c})"),
+            TypeVariable(ref c, ref ts) => {
+                write!(f, "'{c}")?;
+                if !ts.is_empty() {
+                    write!(f, "{{")?;
+                    let mut first = true;
+                    for t in ts {
+                        if !first {
+                            write!(f, ", ")?;
+                        }
+                        first = false;
+
+                        write!(f, "{t}")?;
+                    }
+                    write!(f, "}}")?;
+                }
+                Ok(())
+            }
         }
     }
 }

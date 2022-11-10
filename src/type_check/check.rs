@@ -62,27 +62,36 @@ pub struct TypeCollection {
 }
 
 impl TypeCollection {
-    pub fn new() -> Self { TypeCollection { next: 0, map: BTreeMap::new() } }
+    pub fn new() -> Self { TypeCollection { next: 1, map: BTreeMap::new() } }
     pub fn next(&mut self) -> Type {
-        let t = Type::TypeVariable(self.next);
+        let t = Type::type_variable(self.next);
         self.map.insert(self.next, t.clone());
 
         self.next += 1;
         t
     }
     pub fn next_integral(&mut self) -> Type {
-        let t = Type::IntegralVariable(self.next);
+        let t = Type::int_variable(self.next);
         self.map.insert(self.next, t.clone());
 
         self.next += 1;
         t
+    }
+    /// -> (ref type, inner type)
+    pub fn next_ref(&mut self) -> (Type, Type) {
+        let inner_t = Box::new(self.next());
+        let t = Type::TypeVariable(self.next, vec![Type::Reference(inner_t.clone()), Type::MutReference(inner_t.clone())]);
+        self.map.insert(self.next, t.clone());
+
+        self.next += 1;
+        (t, *inner_t)
     }
     pub fn convert(&mut self, th: TypeHint) -> Type {
         match th {
             TypeHint::Inferred => self.next(),
             TypeHint::Named(t) => t.into(&mut |_| {
                 let n = self.next;
-                self.map.insert(self.next, Type::TypeVariable(n));
+                self.map.insert(self.next, Type::type_variable(n));
                 self.next += 1;
                 n
             }),
@@ -93,35 +102,54 @@ impl TypeCollection {
 
         match (self.lookup_by_type(&lhs), self.lookup_by_type(&rhs)) {
             (a, b) if a == b => Ok(a),
-            (IntegralVariable(n2) | TypeVariable(n2), IntegralVariable(n)) | (IntegralVariable(n), TypeVariable(n2)) => {
-                let t = self.map[&n].clone();
+            (TypeVariable(n, ts), TypeVariable(n2, ts2)) => {
+                let intersection = if ts.is_empty() {
+                    ts2
+                } else if ts2.is_empty() {
+                    ts
+                } else {
+                    let mut v = Vec::with_capacity(ts.len().min(ts2.len()));
 
-                *self.map.get_mut(&n2).unwrap() = t.clone();
+                    for t in ts {
+                        if ts2.contains(&t) {
+                            v.push(t);
+                        }
+                    }
 
-                Ok(t)
-            }
-            (TypeVariable(n), TypeVariable(n2)) => {
-                let t = self.map[&n].clone();
+                    v
+                };
 
-                *self.map.get_mut(&n2).unwrap() = t.clone();
+                let t = TypeVariable(n, intersection);
 
-                Ok(t)
-            }
-            (TypeVariable(n), t) | (t, TypeVariable(n)) => {
                 *self.map.get_mut(&n).unwrap() = t.clone();
+                *self.map.get_mut(&n2).unwrap() = t.clone();
 
                 Ok(t)
+            }
+            (TypeVariable(n, ts), t) | (t, TypeVariable(n, ts)) => {
+                let ut;
+                if ts.is_empty() {
+                    ut = t;
+                } else {
+                    let mut unified_t = None;
+    
+                    for gt in ts.clone() {
+                        match self.unify(gt, t.clone()) {
+                            Ok(t) => {
+                                unified_t = Some(t);
+                                break
+                            }
+                            Err(_) => (),
+                        }
+                    }
+    
+                    ut = unified_t.ok_or(TypeError::CouldNotUnifyTypes(FileSpan::dud(), TypeVariable(n, ts), t))?;
+                }
+
+                *self.map.get_mut(&n).unwrap() = ut.clone();
+
+                Ok(ut)
             },
-            (IntegralVariable(n), Int) | (Int, IntegralVariable(n)) => {
-                *self.map.get_mut(&n).unwrap() = Int;
-
-                Ok(Int)
-            }
-            (IntegralVariable(n), Uint) | (Uint, IntegralVariable(n)) => {
-                *self.map.get_mut(&n).unwrap() = Uint;
-
-                Ok(Uint)
-            }
             (Array(t), Array(t2)) => self.unify(*t, *t2).map(|t| Array(Box::new(t))),
             (Tuple(ts), Tuple(ts2)) if ts.len() == ts2.len() => {
                 let mut v = Vec::with_capacity(ts.len());
@@ -148,7 +176,8 @@ impl TypeCollection {
     pub fn lookup_by_type(&self, t: &Type) -> Type {
         use self::NamedType::*;
         match t {
-            TypeVariable(n) | IntegralVariable(n) => self.lookup_type(*n),
+            // TODO: maybe handle the second arg here
+            TypeVariable(n, _) => self.lookup_type(*n),
             Array(t) => Array(Box::new(self.lookup_by_type(t))),
             Option(t) => Option(Box::new(self.lookup_by_type(t))),
             Reference(t) => Reference(Box::new(self.lookup_by_type(t))),
@@ -166,7 +195,7 @@ impl TypeCollection {
     /// Look up given type variable name in the inner map for its potential more specific type (either more concrete or just the same as another type variable)
     fn lookup_type(&self, name: TypeVariableName) -> Type {
         match &self.map[&name] {
-            NamedType::TypeVariable(n) | NamedType::IntegralVariable(n) if *n != name => self.lookup_type(*n),
+            NamedType::TypeVariable(n, _) if *n != name => self.lookup_type(*n),
             t => t.clone(),
         }
     }
@@ -345,16 +374,11 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
         UntypedExpr::Deref(fs, expr) => {
             let (ref_t, expr) = check_exp(*expr, st, tv)?;
 
-            let t = tv.next();
-            let ref_t_immut = Type::Reference(Box::new(t.clone()));
-            let ref_t_mut = Type::MutReference(Box::new(t));
+            let (generic_ref_t, inner_generic_t) = tv.next_ref();
 
-            let unified_ref_t = tv.unify(ref_t.clone(), ref_t_immut).or_else(|_| tv.unify(ref_t.clone(), ref_t_mut));
+            let _t = tv.unify(ref_t.clone(), generic_ref_t).map_err(|_| TypeError::CannotBeDereferenced(fs, ref_t))?;
+            let t = tv.lookup_by_type(&inner_generic_t);
 
-            let t = match unified_ref_t {
-                Ok(Type::Reference(t) | Type::MutReference(t)) => *t,
-                _ => return Err(TypeError::CannotBeDereferenced(fs, ref_t)),
-            };
             (t, Expr::Deref(Box::new(expr)))
         }
         UntypedExpr::Block(_, stmnts) => {

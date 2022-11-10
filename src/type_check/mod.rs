@@ -20,16 +20,26 @@ pub fn type_check(stmnts: SourceStatements, function_table: impl IntoIterator<It
 }
 
 /// Make types as specific as possible
-fn type_specifier((rt, mut stmnts): (ReturnType, TypedStatements), tv: &mut TypeCollection) -> (ReturnType, TypedStatements) {
-    let rt = tv.lookup_by_type(&rt);
-
+fn type_specifier((mut rt, mut stmnts): (ReturnType, TypedStatements), tv: &mut TypeCollection) -> (ReturnType, TypedStatements) {
+    type_specify_type(&mut rt, tv);
     type_specify_statements(&mut stmnts, tv);
 
     (rt, stmnts)
 }
 
 fn type_specify_type(t: &mut ProperType, tv: &mut TypeCollection) {
-    *t = tv.lookup_by_type(&t);
+    // TODO: this function sucks
+    fn collapse_int_uint(t: ProperType) -> ProperType {
+        match t {
+            ProperType::TypeVariable(_, ts) if &ts == &[ProperType::Int, ProperType::Uint] => ProperType::Int,
+            ProperType::Option(t) => ProperType::Option(Box::new(collapse_int_uint(*t))),
+            ProperType::Reference(t) => ProperType::Reference(Box::new(collapse_int_uint(*t))),
+            ProperType::MutReference(t) => ProperType::MutReference(Box::new(collapse_int_uint(*t))),
+            t => t,
+        }
+    }
+
+    *t = collapse_int_uint(tv.lookup_by_type(&t));
 }
 
 fn type_specify_statements(stmnts: &mut TypedStatements, tv: &mut TypeCollection) {

@@ -39,7 +39,7 @@ fn main() {
     functions.insert("or".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
     functions.insert("concat".to_owned(), (Type::Tuple(vec![Type::String, Type::String]), Type::String));
     functions.insert("read".to_owned(), (Type::Unit, Type::String));
-    functions.insert("show".to_owned(), (Type::Reference(Box::new(Type::TypeVariable(NoTypeVariable))), Type::String));
+    functions.insert("show".to_owned(), (Type::Reference(Box::new(Type::type_variable(NoTypeVariable))), Type::String));
     functions.insert("print".to_owned(), (Type::String, Type::Unit));
     functions.insert("println".to_owned(), (Type::String, Type::Unit));
 
