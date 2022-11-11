@@ -37,8 +37,8 @@ Statements -> Statements:
 Statement -> Statement:
     'VAR' Var 'EQ' Expr { Statement::VarAssign(FileSpan::new($lexer, $span), $2.0, $2.1, $4) }
   | 'LET' Var 'EQ' Expr { Statement::ConstAssign(FileSpan::new($lexer, $span), $2.0, $2.1, $4) }
-  | 'FN' 'ID' 'LPAREN' Vars 'RPAREN' Expr { Statement::Function(FileSpan::new($lexer, $span), get_str($lexer, $2), $4, $6) }
-  | 'ID' 'EQ' Expr { Statement::Reassign(FileSpan::new($lexer, $span), get_str($lexer, $1).to_owned(), $3) }
+  | 'FN' Identifier 'LPAREN' Vars 'RPAREN' Expr { Statement::Function(FileSpan::new($lexer, $span), $2, $4, $6) }
+  | Expr 'EQ' Expr { Statement::Reassign(FileSpan::new($lexer, $span), ReassignLhs::from_expr($1).unwrap(), $3) }
   | 'RET' Expr { Statement::Return(FileSpan::new($lexer, $span), $2) }
   | Expr { Statement::DiscardExpr($1) }
   ;
@@ -46,6 +46,7 @@ Statement -> Statement:
 Vars -> Vars:
     Var 'COMMA' Vars { {let mut v = $3; v.insert(0, $1); v} }
   | Var { vec![$1] }
+  // add tuple desctructuring
   | { Vec::new() }
   ;
 

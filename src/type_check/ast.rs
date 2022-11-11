@@ -39,7 +39,7 @@ pub enum Expr {
 pub enum Statement {
     VarAssign(String, Type, Expr),
     ConstAssign(String, Type, Expr),
-    Reassign(String, Expr),
+    Reassign(ReassignLhs, Expr),
     Function(String, Vec<(String, Type)>, ReturnType, Expr),
     DiscardExpr(Type, Expr),
     Return(ReturnType, Expr),
@@ -54,6 +54,26 @@ impl Statement {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ReassignLhs {
+    Identifier(String),
+    Member(Box<Self>, String),
+    Index(Box<Self>, Expr),
+    Deref(Box<Self>),
+}
+
+impl Display for ReassignLhs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use self::ReassignLhs::*;
+
+        match self {
+            Identifier(s) => write!(f, "{s}"),
+            Deref(e) => write!(f, "*({e})"),
+            Member(e, i) => write!(f, "({e}).{i}"),
+            Index(e, i) => write!(f, "({e}).[{i}]"),
+        }
+    }
+}
 
 impl Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

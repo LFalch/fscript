@@ -9,6 +9,7 @@ use crate::source::{
         Primitive,
         Statement as UntypedStatement,
         Statements as UntypedStatements,
+        ReassignLhs as UntypedReassignLhs,
     },
 };
 
@@ -136,18 +137,13 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
 
                 typed_stmnts.push(Statement::ConstAssign(ident, t, e));
             }
-            UntypedStatement::Reassign(fs, ident, e) => {
+            UntypedStatement::Reassign(fs, lhs, e) => {
+                let (lhs_t, lhs) = check_reassign_lhs(lhs, st, tv)?;
                 let (te, e) = check_exp(e, st, tv)?;
 
-                let t = match st.get(&ident) {
-                    None => return Err(TypeError::NoSuchVariable(fs, ident)),
-                    Some((false, _)) => return Err(TypeError::NotMutable(fs, ident)),
-                    Some((true, t)) => t.clone(),
-                };
+                let _t = tv.unify(lhs_t, te).fs(fs)?;
 
-                let _t = tv.unify(t, te).fs(fs)?;
-
-                typed_stmnts.push(Statement::Reassign(ident, e));
+                typed_stmnts.push(Statement::Reassign(lhs, e));
             }
             UntypedStatement::Function(fs, name, args, body) => {
                 let mut body_st = st.clone();
@@ -201,6 +197,45 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
     }
 
     Ok((rt, typed_stmnts))
+}
+
+pub fn check_reassign_lhs(lhs: UntypedReassignLhs, st: &mut SymbolTable, tv: &mut TypeCollection) -> Result<(Type, ReassignLhs), TypeError> {
+    Ok(match lhs {
+        UntypedReassignLhs::Identifier(_, ident) => {
+            let t = st.get(&ident).map(|(_, t)| t.clone()).unwrap_or_else(|| tv.next());
+
+            (t, ReassignLhs::Identifier(ident))
+        }
+        UntypedReassignLhs::Deref(fs, lhs) => {
+            let (ref_t, lhs) = check_reassign_lhs(*lhs, st, tv)?;
+
+            let (generic_ref_t, inner_generic_t) = tv.next_ref();
+
+            let _t = tv.unify(ref_t.clone(), generic_ref_t).map_err(|_| TypeError::CannotBeDereferenced(fs, ref_t))?;
+            let t = tv.lookup_by_type(&inner_generic_t);
+
+            (t, ReassignLhs::Deref(Box::new(lhs)))
+        }
+        UntypedReassignLhs::Index(_, array, index) => {
+            let array_fs = array.file_span();
+            let index_fs = index.file_span();
+
+            let (array_t, array) = check_reassign_lhs(*array, st, tv)?;
+            let (index_t, index) = check_exp(index, st, tv)?;
+
+            let generic_at = Type::Array(Box::new(tv.next()));
+            let array_t = tv.unify(array_t.clone(), generic_at.clone()).fs(array_fs)?;
+            let index_t = tv.unify(index_t.clone(), Type::Uint).fs(index_fs)?;
+
+            let element_t = match (array_t, index_t) {
+                (Type::Array(et), Type::Uint) => et,
+                _ => unreachable!(),
+            };
+
+            (*element_t, ReassignLhs::Index(Box::new(array), index))
+        }
+        UntypedReassignLhs::Member(_fs, _lhs, _s) => unimplemented!("no types have mutable properties yet"),
+    })
 }
 
 pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollection) -> Result<(Type, Expr), TypeError> {

@@ -117,10 +117,52 @@ impl Expr {
 }
 
 #[derive(Debug, Clone)]
+pub enum ReassignLhs {
+    Identifier(FileSpan, String),
+    Member(FileSpan, Box<Self>, String),
+    Index(FileSpan, Box<Self>, Expr),
+    Deref(FileSpan, Box<Self>),
+}
+
+impl ReassignLhs {
+    pub fn from_expr(lhs: Expr) -> Option<Self> {
+        Some(match lhs {
+            Expr::Identifer(fs, s) => Self::Identifier(fs, s),
+            Expr::Member(fs, e, s) => Self::Member(fs, Box::new(Self::from_expr(*e)?), s),
+            Expr::Index(fs, e, index) => Self::Index(fs, Box::new(Self::from_expr(*e)?), *index),
+            Expr::Deref(fs, e) => Self::Deref(fs, Box::new(Self::from_expr(*e)?)),
+            _ => return None,
+        })
+    }
+    pub fn file_span(&self) -> FileSpan {
+        match *self {
+            Self::Identifier(fs, _)
+            | Self::Deref(fs, _)
+            | Self::Member(fs, _, _)
+            | Self::Index(fs, _, _)
+             => fs,
+        }
+    }
+}
+
+impl Display for ReassignLhs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use self::ReassignLhs::*;
+
+        match self {
+            Identifier(_, s) => write!(f, "{s}"),
+            Deref(_, e) => write!(f, "*({e})"),
+            Member(_, e, i) => write!(f, "({e}).{i}"),
+            Index(_, e, i) => write!(f, "({e}).[{i}]"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Statement {
     VarAssign(FileSpan, String, Type, Expr),
     ConstAssign(FileSpan, String, Type, Expr),
-    Reassign(FileSpan, String, Expr),
+    Reassign(FileSpan, ReassignLhs, Expr),
     Function(FileSpan, String, Vec<(String, Type)>, Expr),
     DiscardExpr(Expr),
     Return(FileSpan, Expr),

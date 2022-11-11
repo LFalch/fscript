@@ -10,6 +10,7 @@ use std::mem::replace;
 use collect_result::CollectResult;
 // use lazy_static::__Deref;
 
+use crate::source::ast::ReassignLhs;
 use crate::source::ast::{
     Statement,
     Statements,
@@ -305,6 +306,16 @@ impl StatementsOk {
     }
 }
 
+macro_rules! reassign {
+    ($e:expr, $env:expr) => {
+        match reassign($e, $env) {
+            Ok(v) => v,
+            Err(NoValue::RuntimeError(e)) => return Err(e),
+            Err(NoValue::Return(r)) => return Ok(StatementsOk::Return(r)),
+        }
+    };
+}
+
 macro_rules! eval {
     ($e:expr, $env:expr) => {
         match eval($e, $env) {
@@ -337,12 +348,9 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
                     eprintln!("warning: type annotations are ignored in interpreter mode")
                 }
             }
-            Statement::Reassign(_, ident, expr) => {
+            Statement::Reassign(_, lhs, expr) => {
                 let val = eval!(expr, env);
-                match env.get_mut(&ident) {
-                    Some(var) => *var = val,
-                    None => panic!("no such variable in scope: {}\n{env:?}", ident)
-                }
+                *reassign!(lhs, env) = val;
             }
             Statement::Function(_fl, func_name, arg_names, body) => {
                 let i = env.get_next_index();
@@ -363,6 +371,33 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
     }
 
     Ok(StatementsOk::LastVal(last_val))
+}
+
+fn reassign<'env: 'a, 'a>(lhs: ReassignLhs, env: &'a mut Enviroment<'env>) -> Result<&'a mut Value, NoValue> {
+    Ok(match lhs {
+        ReassignLhs::Identifier(_, ident) => {
+            match env.get_mut(&ident) {
+                Some(var) => var,
+                // TODO: Make this a runtime error and use file span
+                None => panic!("no such variable in scope: {ident}")
+            }
+        }
+        ReassignLhs::Deref(_, lhs) => {
+            let addr = match reassign(*lhs, env)? {
+                Value::MutRef(n) => *n,
+                _ => panic!("not a mutable reference"),
+            };
+            env.index_mut(addr)
+        }
+        ReassignLhs::Member(_, _, _) => unimplemented!("no mutable members exist yet"),
+        ReassignLhs::Index(_, array, index) => {
+            let index = eval(index, env)?;
+            match (reassign(*array, env)?, index) {
+                (Value::Array(v), Value::Primitive(AmbigInt(i) | Uint(i))) => &mut v[i as usize],
+                _ => panic!("not an array"),
+            }
+        }
+    })
 }
 
 #[derive(Debug, Clone)]

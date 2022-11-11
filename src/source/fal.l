@@ -53,7 +53,6 @@ float "FLOAT"
 \] "RBRACK"
 \{ "LBRACE"
 \} "RBRACE"
-\z "EOF"
 [ \t\n\r]+ ;
 ^//[^\n]*$ ;
 . "UNMATCHED"
