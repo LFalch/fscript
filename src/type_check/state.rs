@@ -46,10 +46,10 @@ impl TypeCollection {
             }),
         }
     }
-    pub fn unify(&mut self, lhs: Type, rhs: Type) -> Result<Type, TypeError> {
+    pub fn unify(&mut self, lhs: &Type, rhs: &Type) -> Result<Type, TypeError> {
         use self::NamedType::*;
 
-        match (self.lookup_by_type(&lhs), self.lookup_by_type(&rhs)) {
+        match (self.lookup_by_type(lhs), self.lookup_by_type(rhs)) {
             (a, b) if a == b => Ok(a),
             (TypeVariable(n, ts), TypeVariable(n2, ts2)) => {
                 let intersection = if ts.is_empty() {
@@ -83,7 +83,7 @@ impl TypeCollection {
                     let mut unified_t = None;
     
                     for gt in ts.clone() {
-                        match self.unify(gt, t.clone()) {
+                        match self.unify(&gt, &t) {
                             Ok(t) => {
                                 unified_t = Some(t);
                                 break
@@ -99,22 +99,22 @@ impl TypeCollection {
 
                 Ok(ut)
             },
-            (Array(t), Array(t2)) => self.unify(*t, *t2).map(|t| Array(Box::new(t))),
+            (Array(t), Array(t2)) => self.unify(&t, &t2).map(|t| Array(Box::new(t))),
             (Tuple(ts), Tuple(ts2)) if ts.len() == ts2.len() => {
                 let mut v = Vec::with_capacity(ts.len());
 
                 for (a, b) in ts.into_iter().zip(ts2) {
-                    v.push(self.unify(a, b)?);
+                    v.push(self.unify(&a, &b)?);
                 }
 
                 Ok(Tuple(v))
             }
-            (Option(t), Option(t2)) => self.unify(*t, *t2).map(|t| Option(Box::new(t))),
-            (Reference(t), Reference(t2)) => self.unify(*t, *t2).map(|t| Reference(Box::new(t))),
-            (MutReference(t), MutReference(t2)) => self.unify(*t, *t2).map(|t| MutReference(Box::new(t))),
+            (Option(t), Option(t2)) => self.unify(&t, &t2).map(|t| Option(Box::new(t))),
+            (Reference(t), Reference(t2)) => self.unify(&t, &t2).map(|t| Reference(Box::new(t))),
+            (MutReference(t), MutReference(t2)) => self.unify(&t, &t2).map(|t| MutReference(Box::new(t))),
             (Function(ret, arg), Function(ret2, arg2)) => {
-                let arg = self.unify(*arg, *arg2)?;
-                let ret = self.unify(*ret, *ret2)?;
+                let arg = self.unify(&arg, &arg2)?;
+                let ret = self.unify(&ret, &ret2)?;
 
                 Ok(Function(Box::new(ret), Box::new(arg)))
             }

@@ -121,7 +121,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let t = tv.convert(t);
                 let fs = e.file_span();
                 let (te, e) = check_exp(e, st, tv)?;
-                let t = tv.unify(t, te).fs(fs)?;
+                let t = tv.unify(&t, &te).fs(fs)?;
 
                 st.add(ident.clone(), true, t.clone());
 
@@ -131,7 +131,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let t = tv.convert(t);
                 let fs = e.file_span();
                 let (te, e) = check_exp(e, st, tv)?;
-                let t = tv.unify(t, te).fs(fs)?;
+                let t = tv.unify(&t, &te).fs(fs)?;
 
                 st.add(ident.clone(), false, t.clone());
 
@@ -141,7 +141,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 let (lhs_t, lhs) = check_reassign_lhs(lhs, st, tv)?;
                 let (te, e) = check_exp(e, st, tv)?;
 
-                let _t = tv.unify(lhs_t, te).fs(fs)?;
+                let _t = tv.unify(&lhs_t, &te).fs(fs)?;
 
                 typed_stmnts.push(Statement::Reassign(lhs, e));
             }
@@ -166,7 +166,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                 }
                 
                 for rt in returns_in_expr(&body) {
-                    body_t = tv.unify(body_t, rt).fs(fs)?;
+                    body_t = tv.unify(&body_t, &rt).fs(fs)?;
                 }
 
                 let arg_type = match arg_types.len() {
@@ -193,7 +193,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
 
     let mut rt = tv.next();
     for rt_cand in typed_stmnts.iter().flat_map(returns) {
-        rt = tv.unify(rt, rt_cand)?;
+        rt = tv.unify(&rt, &rt_cand)?;
     }
 
     Ok((rt, typed_stmnts))
@@ -211,7 +211,7 @@ pub fn check_reassign_lhs(lhs: UntypedReassignLhs, st: &mut SymbolTable, tv: &mu
 
             let (generic_ref_t, inner_generic_t) = tv.next_ref();
 
-            let _t = tv.unify(ref_t.clone(), generic_ref_t).map_err(|_| TypeError::CannotBeDereferenced(fs, ref_t))?;
+            let _t = tv.unify(&ref_t, &generic_ref_t).map_err(|_| TypeError::CannotBeDereferenced(fs, ref_t))?;
             let t = tv.lookup_by_type(&inner_generic_t);
 
             (t, ReassignLhs::Deref(Box::new(lhs)))
@@ -224,8 +224,8 @@ pub fn check_reassign_lhs(lhs: UntypedReassignLhs, st: &mut SymbolTable, tv: &mu
             let (index_t, index) = check_exp(index, st, tv)?;
 
             let generic_at = Type::Array(Box::new(tv.next()));
-            let array_t = tv.unify(array_t.clone(), generic_at.clone()).fs(array_fs)?;
-            let index_t = tv.unify(index_t.clone(), Type::Uint).fs(index_fs)?;
+            let array_t = tv.unify(&array_t, &generic_at).fs(array_fs)?;
+            let index_t = tv.unify(&index_t, &Type::Uint).fs(index_fs)?;
 
             let element_t = match (array_t, index_t) {
                 (Type::Array(et), Type::Uint) => et,
@@ -270,7 +270,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
 
             let (generic_ref_t, inner_generic_t) = tv.next_ref();
 
-            let _t = tv.unify(ref_t.clone(), generic_ref_t).map_err(|_| TypeError::CannotBeDereferenced(fs, ref_t))?;
+            let _t = tv.unify(&ref_t, &generic_ref_t).map_err(|_| TypeError::CannotBeDereferenced(fs, ref_t))?;
             let t = tv.lookup_by_type(&inner_generic_t);
 
             (t, Expr::Deref(Box::new(expr)))
@@ -293,7 +293,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
                 let (t2, e) = check_exp(expr, st, tv)?;
                 typed_arr.push(e);
 
-                t = tv.unify(t, t2).fs(fs)?;
+                t = tv.unify(&t, &t2).fs(fs)?;
             }
 
             (Type::Array(Box::new(t)), Expr::Array(typed_arr))
@@ -320,7 +320,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             };
 
             let (at, arg) = check_exp(*arg, st, tv)?;
-            let _at = tv.unify(at, arg_type).fs(fs)?;
+            let _at = tv.unify(&at, &arg_type).fs(fs)?;
 
             (rt.clone(), Expr::Call(rt, name, Box::new(arg)))
         }
@@ -328,7 +328,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (array_t, array) = check_exp(*array, st, tv)?;
 
             let generic_at = Type::Array(Box::new(tv.next()));
-            let _array_t = tv.unify(array_t.clone(), generic_at).map_err(|_| TypeError::LengthOnNonArray(fs, array_t))?;
+            let _array_t = tv.unify(&array_t, &generic_at).map_err(|_| TypeError::LengthOnNonArray(fs, array_t))?;
 
             (Type::Uint, Expr::Member(Type::Uint, Box::new(array), s))
         }
@@ -341,8 +341,8 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (index_t, index) = check_exp(*index, st, tv)?;
 
             let generic_at = Type::Array(Box::new(tv.next()));
-            let array_t = tv.unify(array_t.clone(), generic_at.clone()).fs(array_fs)?;
-            let index_t = tv.unify(index_t.clone(), Type::Uint).fs(index_fs)?;
+            let array_t = tv.unify(&array_t, &generic_at).fs(array_fs)?;
+            let index_t = tv.unify(&index_t, &Type::Uint).fs(index_fs)?;
 
             let element_t = match (array_t, index_t) {
                 (Type::Array(et), Type::Uint) => et,
@@ -357,9 +357,9 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (true_t, if_true) = check_exp(*if_true, st, tv)?;
             let (false_t, if_false) = check_exp(*if_false, st, tv)?;
 
-            tv.unify(bool_t.clone(), Type::Bool).map_err(|_| TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
+            tv.unify(&bool_t, &Type::Bool).map_err(|_| TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
 
-            let t = tv.unify(true_t, false_t).fs(fs)?;
+            let t = tv.unify(&true_t, &false_t).fs(fs)?;
 
             (t, Expr::If(Box::new(cond), Box::new(if_true), Box::new(if_false)))
         }
@@ -368,7 +368,7 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             let (bool_t, cond) = check_exp(*cond, st, tv)?;
             let (_body_t, body) = check_exp(*body, st, tv)?;
 
-            tv.unify(bool_t.clone(), Type::Bool).map_err(|_| TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
+            tv.unify(&bool_t, &Type::Bool).map_err(|_| TypeError::ConditionNotBoolean(cond_fs, bool_t))?;
 
             (Type::Unit, Expr::While(Box::new(cond), Box::new(body)))
         }
