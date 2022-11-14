@@ -30,18 +30,20 @@ fn type_specifier((mut rt, mut stmnts): (ReturnType, TypedStatements), tv: &mut 
 }
 
 fn type_specify_type(t: &mut ProperType, tv: &mut TypeCollection) {
-    // TODO: this function sucks
-    fn collapse_int_uint(t: ProperType) -> ProperType {
+    // TODO: this function sucks less now
+    fn collapse_int_uint(t: &mut ProperType) {
         match t {
-            ProperType::TypeVariable(_, ts) if &ts == &[ProperType::Int, ProperType::Uint] => ProperType::Int,
-            ProperType::Option(t) => ProperType::Option(Box::new(collapse_int_uint(*t))),
-            ProperType::Reference(t) => ProperType::Reference(Box::new(collapse_int_uint(*t))),
-            ProperType::MutReference(t) => ProperType::MutReference(Box::new(collapse_int_uint(*t))),
-            t => t,
+            ProperType::TypeVariable(_, ts) if ts == &[ProperType::Int, ProperType::Uint] => *t = ProperType::Int,
+            ProperType::Option(t) | ProperType::Reference(t)
+            | ProperType::MutReference(t) | ProperType::Array(t) => collapse_int_uint(t),
+            ProperType::Tuple(v) => v.into_iter().for_each(|t| collapse_int_uint(t)),
+            ProperType::Function(t, rt) => {collapse_int_uint(t); collapse_int_uint(rt);},
+            Type::Int | Type::Uint | Type::Unit | Type::Bool | Type::Float | Type::String | Type::TypeVariable(_, _) => (),
         }
     }
 
-    *t = collapse_int_uint(tv.lookup_by_type(&t));
+    *t = tv.lookup_by_type(&t);
+    collapse_int_uint(t);
 }
 
 fn type_specify_statements(stmnts: &mut TypedStatements, tv: &mut TypeCollection) {
