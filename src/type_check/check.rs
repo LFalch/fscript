@@ -242,9 +242,9 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
     Ok(match expr {
         UntypedExpr::Constant(_, Primitive::Bool(b)) => (Type::Bool, Expr::Bool(b)),
         UntypedExpr::Constant(_, Primitive::Float(f)) => (Type::Float, Expr::Float(f)),
-        UntypedExpr::Constant(_, Primitive::Int(n)) => (Type::Int, Expr::Int(n)),
-        UntypedExpr::Constant(_, Primitive::Uint(n)) => (Type::Int, Expr::Uint(n)),
-        UntypedExpr::Constant(_, Primitive::AmbigInt(n)) => (tv.next_integral(), Expr::Uint(n)),
+        UntypedExpr::Constant(_, Primitive::Int(n)) => (Type::Int, Expr::Int(n as u64)),
+        UntypedExpr::Constant(_, Primitive::Uint(n)) => (Type::Int, Expr::Int(n)),
+        UntypedExpr::Constant(_, Primitive::AmbigInt(n)) => (tv.next_integral(), Expr::Int(n)),
         UntypedExpr::Constant(_, Primitive::None) => (Type::Option(Box::new(tv.next())), Expr::None),
         UntypedExpr::Constant(_, Primitive::String(s)) => (Type::String, Expr::String(s)),
         UntypedExpr::Constant(_, Primitive::Unit) => (Type::Unit, Expr::Unit),

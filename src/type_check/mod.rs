@@ -117,7 +117,6 @@ fn type_specify_expr(expr: &mut Expr, tv: &mut TypeCollection) {
         Identifer(_) |
         String(_) |
         Int(_) |
-        Uint(_) |
         Float(_) |
         Bool(_) |
         Unit |

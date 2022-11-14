@@ -15,8 +15,7 @@ pub type Statements = Vec<Statement>;
 pub enum Expr {
     Identifer(String),
     String(String),
-    Int(i64),
-    Uint(u64),
+    Int(u64),
     Float(f64),
     Bool(bool),
     Unit,
@@ -85,8 +84,7 @@ impl Display for Expr {
             Unit => write!(f, "()"),
             Bool(b) => write!(f, "{b}"),
             Float(n) => write!(f, "{n}"),
-            Uint(i) => write!(f, "{i}u"),
-            Int(i) => write!(f, "{i}i"),
+            Int(i) => write!(f, "{i}"),
             String(s) => write!(f, "{s:?}"),
             Some(e) => write!(f, "Some({e})"),
             Array(a) => {
