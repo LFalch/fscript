@@ -37,22 +37,22 @@ Statements -> Statements:
 Statement -> Statement:
     'VAR' Var 'EQ' Expr { Statement::VarAssign(FileSpan::new($lexer, $span), $2.0, $2.1, $4) }
   | 'LET' Var 'EQ' Expr { Statement::ConstAssign(FileSpan::new($lexer, $span), $2.0, $2.1, $4) }
-  | 'FN' Identifier 'LPAREN' Vars 'RPAREN' Expr { Statement::Function(FileSpan::new($lexer, $span), $2, $4, $6) }
+  | 'FN' Identifier 'LPAREN' Vars 'RPAREN' Expr { Statement::Function(FileSpan::new($lexer, $span), $2, Binding::tuple($4.0), Type::tuple($4.1), $6) }
   | Expr 'EQ' Expr { Statement::Reassign(FileSpan::new($lexer, $span), ReassignLhs::from_expr($1).unwrap(), $3) }
   | 'RET' Expr { Statement::Return(FileSpan::new($lexer, $span), $2) }
   | Expr { Statement::DiscardExpr($1) }
   ;
 
-Vars -> Vars:
-    Var 'COMMA' Vars { {let mut v = $3; v.insert(0, $1); v} }
-  | Var { vec![$1] }
-  // add tuple desctructuring
-  | { Vec::new() }
+Vars -> (Vec<Binding>, Vec<Type>):
+    Var 'COMMA' Vars { {let (mut bs, mut ts) = $3; bs.insert(0, $1.0); ts.insert(0, $1.1); (bs, ts)} }
+  | Var { (vec![$1.0], vec![$1.1]) }
+  | { (Vec::new(), Vec::new()) }
   ;
 
-Var -> Var:
-    'ID' { (get_str($lexer, $1), Type::Inferred) }
-  | 'ID' 'COLON' Type { (get_str($lexer, $1), Type::Named($3)) }
+Var -> (Binding, Type):
+    'ID' { (Binding::Name(get_str($lexer, $1)), Type::Inferred) }
+  | 'ID' 'COLON' Type { (Binding::Name(get_str($lexer, $1)), Type::Named($3)) }
+  | 'LPAREN' Vars 'RPAREN' { (Binding::tuple($2.0), Type::tuple($2.1)) }
   ;
 
 Type -> NamedType:
@@ -171,9 +171,6 @@ use crate::types::Type as NamedType;
 
 use lrpar::{NonStreamingLexer, Span};
 use lrlex::DefaultLexeme;
-
-pub type Var = (String, Type);
-pub type Vars = Vec<Var>;
 
 pub type Statements = Vec<Statement>;
 

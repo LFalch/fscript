@@ -1,10 +1,10 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use super::ast::*;
+use super::{ast::*, check::ReturnType};
 use super::check::TypeError;
 use crate::source::{ast::Type as TypeHint, FileSpan};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TypeCollection {
     next: TypeVariableName,
     map: BTreeMap<TypeVariableName, Type>,
@@ -12,40 +12,53 @@ pub struct TypeCollection {
 
 impl TypeCollection {
     pub fn new() -> Self { TypeCollection { next: 1, map: BTreeMap::new() } }
-    pub fn next(&mut self) -> Type {
-        let t = Type::type_variable(self.next);
-        self.map.insert(self.next, t.clone());
-
+    fn next_id(&mut self) -> u64 {
+        let i = self.next;
         self.next += 1;
+        i
+    }
+    pub fn next(&mut self) -> Type {
+        let next_id = self.next_id();
+        let t = Type::type_variable(next_id);
+        self.map.insert(next_id, t.clone());
+
         t
     }
     pub fn next_integral(&mut self) -> Type {
-        let t = Type::int_variable(self.next);
-        self.map.insert(self.next, t.clone());
+        let next_id = self.next_id();
+        let t = Type::int_variable(next_id);
+        self.map.insert(next_id, t.clone());
 
-        self.next += 1;
+        t
+    }
+    pub fn next_with(&mut self, candidates: Vec<Type>) -> Type {
+        let next_id = self.next_id();
+        let t = Type::TypeVariable(next_id, candidates);
+        self.map.insert(next_id, t.clone());
+
         t
     }
     /// -> (ref type, inner type)
     pub fn next_ref(&mut self) -> (Type, Type) {
         let inner_t = Box::new(self.next());
-        let t = Type::TypeVariable(self.next, vec![Type::Reference(inner_t.clone()), Type::MutReference(inner_t.clone())]);
-        self.map.insert(self.next, t.clone());
+        let next_id = self.next_id();
+        let t = Type::TypeVariable(next_id, vec![Type::Reference(inner_t.clone()), Type::MutReference(inner_t.clone())]);
+        self.map.insert(next_id, t.clone());
 
-        self.next += 1;
         (t, *inner_t)
     }
     pub fn convert(&mut self, th: TypeHint) -> Type {
         match th {
             TypeHint::Inferred => self.next(),
+            TypeHint::Tuple(ts) => Type::Tuple(ts.into_iter().map(|t| self.convert(t)).collect()),
             TypeHint::Named(t) => t.into(&mut |_| {
-                let n = self.next;
-                self.map.insert(self.next, Type::type_variable(n));
-                self.next += 1;
+                let n = self.next_id();
+                self.map.insert(n, Type::type_variable(n));
                 n
             }),
         }
     }
+    // TODO: work on making this less aggressive at times
     pub fn unify(&mut self, lhs: &Type, rhs: &Type) -> Result<Type, TypeError> {
         use self::NamedType::*;
 
@@ -157,18 +170,62 @@ impl TypeCollection {
 
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
-    inner: HashMap<String, (bool, Type)>
+    // Non-function variables and mutable function pointers
+    variables: HashMap<String, (bool, Type)>,
+    // non-mutable functions
+    fn_table: HashMap<String, HashSet<(Type, ReturnType)>>
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
-        SymbolTable { inner: HashMap::new() }
+        SymbolTable {
+            variables: HashMap::new(),
+            fn_table: HashMap::new(),
+        }
     }
-    pub fn add<S: ToString + AsRef<str>>(&mut self, s: S, mutable: bool, t: Type) {
-        // TODO: handle function overloading
-        self.inner.insert(s.to_string(), (mutable, t));
+    pub fn bind(&mut self, b: &Binding, mutable: bool, t: Type) -> Result<(), TypeError> {
+        match (b, t) {
+            (Binding::Unit, Type::Unit) => Ok(()),
+            (Binding::Unit, t) => panic!("{t} was not a unit"),
+            (Binding::Name(s), t) => {
+                self.add(s, mutable, t);
+                Ok(())
+            }
+            (Binding::Tuple(bs), Type::Tuple(ts)) => {
+                if bs.len() != ts.len() {
+                    panic!("non-matching tuple sizes to destructure")
+                }
+                for (b, t) in bs.into_iter().zip(ts) {
+                    self.bind(b, mutable, t)?;
+                }
+                Ok(())
+            }
+            (Binding::Tuple(_), v) => panic!("{v:?} was not a tuple"),
+        }
     }
-    pub fn get(&self, s: &str) -> Option<&(bool, Type)> {
-        self.inner.get(s)
+    pub fn add<S: ToString>(&mut self, s: S, mutable: bool, t: Type) {
+        match (mutable, t) {
+            (false, Type::Function(t, rt)) => {
+                self.add_fn(s, *t, *rt);
+            }
+            (_, t) => {
+                self.variables.insert(s.to_string(), (mutable, t));
+            }
+        }
+    }
+    pub fn add_fn<S: ToString>(&mut self, s: S, arg: Type, rt: Type) {
+        let s = s.to_string();
+        self.fn_table.entry(s.to_string()).or_insert_with(HashSet::new).insert((arg, rt));
+    }
+    pub fn get(&self, s: &str) -> impl '_ + Iterator<Item=(bool, Type)> {
+        self.variables.get(s).into_iter()
+            .map(|x| x.clone())
+            .chain(self.fn_table.get(s).map(|t| t.iter().map(|(t, rt)| (false, Type::Function(Box::new(t.clone()), Box::new(rt.clone()))))).into_iter().flatten())
+    }
+    pub fn get_var(&self, s: &str) -> Option<&(bool, Type)> {
+        self.variables.get(s)
+    }
+    pub fn get_fun(&self, s: &str) -> impl '_ + Iterator<Item=&(Type, ReturnType)> {
+        self.fn_table.get(s).map(|set| set.into_iter()).into_iter().flatten()
     }
 }

@@ -34,12 +34,14 @@ pub enum Expr {
     While(Box<Expr>, Box<Expr>),
 }
 
+pub type Binding = crate::source::ast::Binding;
+
 #[derive(Debug, Clone)]
 pub enum Statement {
-    VarAssign(String, Type, Expr),
-    ConstAssign(String, Type, Expr),
+    VarAssign(Binding, Type, Expr),
+    ConstAssign(Binding, Type, Expr),
     Reassign(ReassignLhs, Expr),
-    Function(String, Vec<(String, Type)>, ReturnType, Expr),
+    Function(String, Binding, Type, ReturnType, Expr),
     DiscardExpr(Type, Expr),
     Return(ReturnType, Expr),
 }
@@ -141,21 +143,10 @@ impl Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use self::Statement::*;
         match self {
-            VarAssign(n, t, e) => write!(f, "var {n}: {t} = {e}"),
-            ConstAssign(n, t, e) => write!(f, "let {n}: {t} = {e}"),
+            VarAssign(b, t, e) => write!(f, "var {b}: {t} = {e}"),
+            ConstAssign(b, t, e) => write!(f, "let {b}: {t} = {e}"),
             Reassign(n, e) => write!(f, "{n} = {e}"),
-            Function(n, args, rt, e) => {
-                write!(f, "fn {n}(")?;
-                let mut comma_first = false;
-                for (n, t) in args {
-                    if comma_first {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{n}: {t}")?;
-                    comma_first = true;
-                }
-                write!(f, ") -> {rt}: {e}")
-            }
+            Function(n, b, t, rt, e) => write!(f, "fn {n}{b:#} : {t} -> {rt}. {e}"),
             DiscardExpr(t, e) => write!(f, "{e}  (: {t})"),
             Return(rt, e) => write!(f, "-> {e}  : {rt}"),
         }

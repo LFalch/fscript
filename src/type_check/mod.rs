@@ -15,7 +15,9 @@ pub fn type_check(stmnts: SourceStatements, function_table: impl IntoIterator<It
     let mut tv = TypeCollection::new();
 
     for (n, (arg_type, ret_type)) in function_table {
-        st.add(n, false, tv.convert(TypeHint::Named(Type::Function(Box::new(arg_type), Box::new(ret_type)))));
+        let arg = tv.convert(TypeHint::Named(arg_type));
+        let rt = tv.convert(TypeHint::Named(ret_type));
+        st.add_fn(n, arg, rt);
     }
 
     check_statements(stmnts, &mut st, &mut tv).map(|r| type_specifier(r, &mut tv))
@@ -62,8 +64,8 @@ fn type_specify_statements(stmnts: &mut TypedStatements, tv: &mut TypeCollection
             Reassign(_, e) => {
                 type_specify_expr(e, tv);
             }
-            Function(_, args, rt, e) => {
-                args.iter_mut().for_each(|(_, t)| type_specify_type(t, tv));
+            Function(_, _, t, rt, e) => {
+                type_specify_type(t, tv);
                 type_specify_type(rt, tv);
                 type_specify_expr(e, tv);
             }
