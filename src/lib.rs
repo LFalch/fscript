@@ -6,5 +6,6 @@ pub mod types;
 pub mod stack_table;
 pub mod source;
 pub mod interpreter;
+pub mod tinterpreter;
 pub mod type_check;
 pub mod vm;
