@@ -203,3 +203,7 @@ pub(super) fn int(mut args: Vec<Value>, _env: &Enviroment) -> Value {
         _ => panic!("wrong type"),
     }
 }
+
+pub(super) fn dummy(_args: Vec<Value>, _env: &Enviroment) -> Value {
+    unimplemented!("dummy function, should not be called")
+}

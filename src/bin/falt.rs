@@ -1,47 +1,61 @@
-use std::{fs::File, collections::HashMap};
+use std::fs::File;
 
 use fscript::{
     source::parse_source,
     type_check::type_check,
-    types::{Type, NoTypeVariable},
+    types::Type,
 };
 
 fn main() {
-    let mut functions = HashMap::new();
+    use self::Type::*;
 
-    functions.insert("add".to_owned(), (Type::Tuple(vec![Type::Float, Type::Float]), Type::Float));
-    functions.insert("sub".to_owned(), (Type::Tuple(vec![Type::Float, Type::Float]), Type::Float));
-    functions.insert("mul".to_owned(), (Type::Tuple(vec![Type::Float, Type::Float]), Type::Float));
-    functions.insert("div".to_owned(), (Type::Tuple(vec![Type::Float, Type::Float]), Type::Float));
-    functions.insert("rem".to_owned(), (Type::Tuple(vec![Type::Float, Type::Float]), Type::Float));
-    functions.insert("add".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("sub".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("mul".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("div".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("rem".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("add".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("sub".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("mul".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("div".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("rem".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("shl".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("shr".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("shl".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("shr".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("and".to_owned(), (Type::Tuple(vec![Type::Bool, Type::Bool]), Type::Bool));
-    functions.insert("xor".to_owned(), (Type::Tuple(vec![Type::Bool, Type::Bool]), Type::Bool));
-    functions.insert("or".to_owned(), (Type::Tuple(vec![Type::Bool, Type::Bool]), Type::Bool));
-    functions.insert("and".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("xor".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("or".to_owned(), (Type::Tuple(vec![Type::Uint, Type::Uint]), Type::Uint));
-    functions.insert("and".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("xor".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("or".to_owned(), (Type::Tuple(vec![Type::Int, Type::Int]), Type::Int));
-    functions.insert("concat".to_owned(), (Type::Tuple(vec![Type::String, Type::String]), Type::String));
-    functions.insert("read".to_owned(), (Type::Unit, Type::String));
-    functions.insert("show".to_owned(), (Type::Reference(Box::new(Type::type_variable(NoTypeVariable))), Type::String));
-    functions.insert("print".to_owned(), (Type::String, Type::Unit));
-    functions.insert("println".to_owned(), (Type::String, Type::Unit));
+    let functions = [
+        ("add".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("add".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("add".to_owned(), (Tuple(vec![Float, Float]), Float)),
+        ("sub".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("sub".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("sub".to_owned(), (Tuple(vec![Float, Float]), Float)),
+        ("mul".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("mul".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("mul".to_owned(), (Tuple(vec![Float, Float]), Float)),
+        ("div".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("div".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("div".to_owned(), (Tuple(vec![Float, Float]), Float)),
+        ("rem".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("rem".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("rem".to_owned(), (Tuple(vec![Float, Float]), Float)),
+        ("shl".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("shl".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("shr".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("shr".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("and".to_owned(), (Tuple(vec![Bool, Bool]), Bool)),
+        ("and".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("and".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("xor".to_owned(), (Tuple(vec![Bool, Bool]), Bool)),
+        ("xor".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("xor".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("or".to_owned(), (Tuple(vec![Bool, Bool]), Bool)),
+        ("or".to_owned(), (Tuple(vec![Uint, Uint]), Uint)),
+        ("or".to_owned(), (Tuple(vec![Int, Int]), Int)),
+        ("eq".to_owned(), (Tuple(vec![Int, Int]), Bool)),
+        ("eq".to_owned(), (Tuple(vec![Uint, Uint]), Bool)),
+        ("eq".to_owned(), (Tuple(vec![Float, Float]), Bool)),
+        ("eq".to_owned(), (Tuple(vec![String, String]), Bool)),
+        ("concat".to_owned(), (Tuple(vec![String, String]), String)),
+        // Wait for proper type variables
+        ("concat".to_owned(), (Tuple(vec![Array(Box::new(Int)), Array(Box::new(Int))]), String)),
+        ("concat".to_owned(), (Tuple(vec![Array(Box::new(Uint)), Array(Box::new(Uint))]), String)),
+        ("concat".to_owned(), (Tuple(vec![Array(Box::new(Float)), Array(Box::new(Float))]), String)),
+        ("concat".to_owned(), (Tuple(vec![Array(Box::new(Bool)), Array(Box::new(Bool))]), String)),
+        ("read".to_owned(), (Unit, String)),
+        ("show".to_owned(), (Reference(Box::new(Int)), String)),
+        ("show".to_owned(), (Reference(Box::new(Uint)), String)),
+        ("show".to_owned(), (Reference(Box::new(Bool)), String)),
+        ("show".to_owned(), (Reference(Box::new(Float)), String)),
+        ("print".to_owned(), (String, Unit)),
+        ("println".to_owned(), (String, Unit)),
+    ];
 
     for arg in std::env::args().skip(1) {
         match &*arg {
@@ -57,7 +71,7 @@ fn main() {
 
                         match type_check(code, functions.clone().into_iter()) {
                             Ok((rt, stmnts)) => {
-                                println!("Return type: {:?}", rt);
+                                println!("Return type: {}", rt);
                                 println!("Typed code:");
                                 for stmnt in stmnts {
                                     println!("{stmnt}");

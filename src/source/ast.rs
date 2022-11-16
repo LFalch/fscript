@@ -8,11 +8,44 @@ use std::fmt::{self, Display};
 pub enum Type {
     Inferred,
     Named(NamedType),
+    Tuple(Vec<Self>),
 }
 
 impl Type {
+    pub fn tuple(mut ts: Vec<Self>) -> Self {
+        match ts.len() {
+            0 => Type::Named(NamedType::Unit),
+            1 => ts.pop().unwrap(),
+            _ => Type::Tuple(ts),
+        }
+    }
     pub fn is_inferred(&self) -> bool {
-        matches!(self, Type::Inferred)
+        match self {
+            Type::Inferred => true,
+            Type::Named(_) => false,
+            Type::Tuple(ts) => ts.iter().all(Type::is_inferred)
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Type::Inferred => "'_".fmt(f),
+            Type::Named(t) => t.fmt(f),
+            Type::Tuple(ts) => {
+                write!(f, "(")?;
+                let mut comma_first = false;
+                for t in ts {
+                    if comma_first {
+                        write!(f, ", ")?;
+                    }
+                    comma_first = true;
+                    write!(f, "{t}")?;
+                }
+                write!(f, ")")
+            }
+        }
     }
 }
 
@@ -159,11 +192,50 @@ impl Display for ReassignLhs {
 }
 
 #[derive(Debug, Clone)]
+pub enum Binding {
+    Name(String),
+    Tuple(Vec<Binding>),
+    Unit
+}
+
+impl Binding {
+    pub fn tuple(mut bs: Vec<Self>) -> Self {
+        match bs.len() {
+            0 => Self::Unit,
+            1 => bs.pop().unwrap(),
+            _ => Self::Tuple(bs)
+        }
+    }
+}
+
+impl Display for Binding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Binding::Name(n) if f.alternate() => write!(f, "({n})"),
+            Binding::Name(n) => write!(f, "{n}"),
+            Binding::Unit => write!(f, "()"),
+            Binding::Tuple(bs) => {
+                write!(f, "(")?;
+                let mut comma_first = false;
+                for e in bs {
+                    if comma_first {
+                        write!(f, ", ")?;
+                    }
+                    comma_first = true;
+                    write!(f, "{e}")?;
+                }
+                write!(f, ")")
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Statement {
-    VarAssign(FileSpan, String, Type, Expr),
-    ConstAssign(FileSpan, String, Type, Expr),
+    VarAssign(FileSpan, Binding, Type, Expr),
+    ConstAssign(FileSpan, Binding, Type, Expr),
     Reassign(FileSpan, ReassignLhs, Expr),
-    Function(FileSpan, String, Vec<(String, Type)>, Expr),
+    Function(FileSpan, String, Binding, Type, Expr),
     DiscardExpr(Expr),
     Return(FileSpan, Expr),
 }
@@ -172,25 +244,13 @@ impl Display for Statement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use self::Statement::*;
         match self {
-            VarAssign(_, n, Type::Inferred, e) => write!(f, "var {n} = {e}"),
-            VarAssign(_, n, Type::Named(t), e) => write!(f, "var {n}: {t} = {e}"),
-            ConstAssign(_, n, Type::Inferred, e) => write!(f, "let {n} = {e}"),
-            ConstAssign(_, n, Type::Named(t), e) => write!(f, "let {n}: {t} = {e}"),
+            VarAssign(_, b, Type::Inferred, e) => write!(f, "var {b} = {e}"),
+            VarAssign(_, b, nt, e) => write!(f, "var {b}: {nt} = {e}"),
+            ConstAssign(_, b, Type::Inferred, e) => write!(f, "let {b} = {e}"),
+            ConstAssign(_, b, nt, e) => write!(f, "let {b}: {nt} = {e}"),
             Reassign(_, n, e) => write!(f, "{n} = {e}"),
-            Function(_, n, args, e) => {
-                write!(f, "fn {n}(")?;
-                let mut comma_first = false;
-                for (n, t) in args {
-                    if comma_first {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{n}")?;
-                    comma_first = true;
-                    if let Type::Named(t) = t {
-                        write!(f, ": {t}")?;
-                    }
-                }
-                write!(f, ") {e}")
+            Function(_, n, arg_names, arg_type, e) => {
+                write!(f, "fn {n}{arg_names:#}: {arg_type} {e}")
             }
             DiscardExpr(e) => write!(f, "{e}"),
             Return(_, e) => write!(f, "-> {e}"),

@@ -74,7 +74,7 @@ fn returns(stmnt: &Statement) -> Vec<ReturnType> {
         VarAssign(_, _, e) => returns_in_expr(e),
         ConstAssign(_, _, e) => returns_in_expr(e),
         Reassign(_, e) => returns_in_expr(e),
-        Function(_, _, _, e) => returns_in_expr(e),
+        Function(_, _, _, _, e) => returns_in_expr(e),
     }
 }
 
@@ -117,25 +117,25 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
     let mut typed_stmnts = Vec::with_capacity(stmnts.len());
     for stmnt in stmnts {
         match stmnt {
-            UntypedStatement::VarAssign(_, ident, t, e) => {
+            UntypedStatement::VarAssign(_, b, t, e) => {
                 let t = tv.convert(t);
                 let fs = e.file_span();
                 let (te, e) = check_exp(e, st, tv)?;
                 let t = tv.unify(&t, &te).fs(fs)?;
 
-                st.add(ident.clone(), true, t.clone());
+                st.bind(&b, true, t.clone())?;
 
-                typed_stmnts.push(Statement::VarAssign(ident, t, e));
+                typed_stmnts.push(Statement::VarAssign(b, t, e));
             }
-            UntypedStatement::ConstAssign(_, ident, t, e) => {
+            UntypedStatement::ConstAssign(_, b, t, e) => {
                 let t = tv.convert(t);
                 let fs = e.file_span();
                 let (te, e) = check_exp(e, st, tv)?;
                 let t = tv.unify(&t, &te).fs(fs)?;
 
-                st.add(ident.clone(), false, t.clone());
+                st.bind(&b, false, t.clone())?;
 
-                typed_stmnts.push(Statement::ConstAssign(ident, t, e));
+                typed_stmnts.push(Statement::ConstAssign(b, t, e));
             }
             UntypedStatement::Reassign(fs, lhs, e) => {
                 let (lhs_t, lhs) = check_reassign_lhs(lhs, st, tv)?;
@@ -145,18 +145,11 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
 
                 typed_stmnts.push(Statement::Reassign(lhs, e));
             }
-            UntypedStatement::Function(fs, name, args, body) => {
+            UntypedStatement::Function(fs, name, arg, arg_type, body) => {
                 let mut body_st = st.clone();
+                let arg_type = tv.convert(arg_type);
 
-                let mut arg_types = Vec::with_capacity(args.len());
-                let mut typed_args = Vec::with_capacity(args.len());
-
-                for (arg_name, arg_type) in args {
-                    let arg_type = tv.convert(arg_type);
-                    arg_types.push(arg_type.clone());
-                    typed_args.push((arg_name.clone(), arg_type.clone()));
-                    body_st.add(arg_name, true, arg_type);
-                }
+                body_st.bind(&arg, true, arg_type.clone())?;
 
                 let (mut body_t, body) = check_exp(body, &mut body_st, tv)?;
                 drop(body_st);
@@ -169,15 +162,9 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
                     body_t = tv.unify(&body_t, &rt).fs(fs)?;
                 }
 
-                let arg_type = match arg_types.len() {
-                    0 => Type::Unit,
-                    1 => arg_types.pop().unwrap(),
-                    _ => Type::Tuple(arg_types),
-                };
+                st.add(name.clone(), false, Type::Function(Box::new(arg_type.clone()), Box::new(body_t.clone())));
 
-                st.add(name.clone(), false, Type::Function(Box::new(arg_type), Box::new(body_t.clone())));
-
-                typed_stmnts.push(Statement::Function(name, typed_args, body_t, body));
+                typed_stmnts.push(Statement::Function(name, arg, arg_type, body_t, body));
             }
             UntypedStatement::DiscardExpr(e) => {
                 let (t, e) = check_exp(e, st, tv)?;
@@ -202,7 +189,7 @@ pub fn check_statements(stmnts: UntypedStatements, st: &mut SymbolTable, tv: &mu
 pub fn check_reassign_lhs(lhs: UntypedReassignLhs, st: &mut SymbolTable, tv: &mut TypeCollection) -> Result<(Type, ReassignLhs), TypeError> {
     Ok(match lhs {
         UntypedReassignLhs::Identifier(_, ident) => {
-            let t = st.get(&ident).map(|(_, t)| t.clone()).unwrap_or_else(|| tv.next());
+            let t = st.get_var(&ident).map(|(_, t)| t.clone()).unwrap_or_else(|| tv.next());
 
             (t, ReassignLhs::Identifier(ident))
         }
@@ -249,7 +236,15 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
         UntypedExpr::Constant(_, Primitive::String(s)) => (Type::String, Expr::String(s)),
         UntypedExpr::Constant(_, Primitive::Unit) => (Type::Unit, Expr::Unit),
         UntypedExpr::Identifer(_, ident) => {
-            let t = st.get(&ident).map(|(_, t)| t.clone()).unwrap_or_else(|| tv.next());
+            let mut types = Vec::new();
+            for (_, t) in st.get(&ident) {
+                types.push(t);
+            }
+            let t = if types.len() == 1 {
+                types[0].clone()
+            } else {
+                tv.next_with(types)
+            };
 
             (t, Expr::Identifer(ident))
         }
@@ -312,17 +307,39 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
             (Type::Tuple(types), Expr::Tuple(elements))
         }
         UntypedExpr::Call(fs, name, arg) => {
-            let ft = st.get(&name).ok_or(TypeError::NoSuchFunction(fs, name.clone()))?.1.clone();
+            let mut types = Vec::new();
 
-            let (arg_type, rt) = match ft {
-                Type::Function(arg_type, rt) => (*arg_type, *rt),
-                ft => return Err(TypeError::NotAFunction(fs, name.clone(), ft)),
-            };
-
+            let rt_predicted = tv.next();
             let (at, arg) = check_exp(*arg, st, tv)?;
-            let _at = tv.unify(&at, &arg_type).fs(fs)?;
 
-            (rt.clone(), Expr::Call(rt, name, Box::new(arg)))
+            for (t, rt) in st.get_fun(&name) {
+                let mut tv_ = tv.clone();
+
+                match (tv_.unify(&at, t), tv_.unify(&rt_predicted, rt)) {
+                    (Ok(at), Ok(rt)) => {
+                        types.push((tv_, at, rt));
+                    }
+                    (Err(_e), _) | (_, Err(_e)) => (),
+                }
+            }
+
+            match &*types {
+                [] => return Err(TypeError::NoSuchFunction(fs, name)),
+                [(tv_, _at, rt)] => {
+                    *tv = tv_.clone();
+                    (rt.clone(), Expr::Call(rt.clone(), name, Box::new(arg)))
+                }
+                ts => {
+                    let mut ret = Vec::new();
+                    for (_tv, _t, rt) in ts {
+                        ret.push(rt.clone());
+                    }
+
+                    let rt = tv.next_with(ret);
+
+                    (rt.clone(), Expr::Call(rt, name, Box::new(arg)))
+                }
+            }
         }
         UntypedExpr::Member(fs, array, s) if s == "len" => {
             let (array_t, array) = check_exp(*array, st, tv)?;

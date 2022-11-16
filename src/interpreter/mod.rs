@@ -12,11 +12,11 @@ use collect_result::CollectResult;
 
 use crate::source::ast::ReassignLhs;
 use crate::source::ast::{
+    Binding,
     Statement,
     Statements,
     Expr,
     Primitive::{self, String as LString, AmbigInt, Uint, Unit, None as LNone},
-    Type,
 };
 
 use crate::source::FileSpan;
@@ -28,30 +28,30 @@ pub enum Function {
     /// Used for built-in functions.
     Builtin(fn(Vec<Value>, &Enviroment) -> Value),
     /// A function that is defined in fscript
-    Implemented(Vec<(String, Type)>, SymbolTable, Statements),
+    Implemented(Binding, SymbolTable, Statements),
 }
 
 impl Function {
     fn call(self, arg: Value, env: &mut Enviroment) -> Result<Value, RuntimeError> {
-        let args = match arg {
-            Value::Tuple(v) => v,
-            Value::Primitive(Unit) => Vec::new(),
-            v => vec![v],
-        };
         match self {
-            Function::Implemented(arg_names, fn_sym_tab, body) => {
+            Function::Implemented(bindings, fn_sym_tab, body) => {
                 let Enviroment { stack, .. } = env;
                 let parent_stack_length = stack.len();
 
                 let ref mut env = Enviroment { stack: *stack, parent_stack_length, table: SymbolTable::new(), parent_tables: Box::new([&fn_sym_tab]) };
 
-                for ((name, _), val) in arg_names.into_iter().zip(args) {
-                    env.add_var(name, val);
-                }
+                env.bind(bindings, true, arg);
 
                 run_statements(body.clone(), env).map(StatementsOk::get_return)
             }
-            Function::Builtin(f) => Ok(f(args, &*env)),
+            Function::Builtin(f) => {
+                let args = match arg {
+                    Value::Tuple(v) => v,
+                    Value::Primitive(Unit) => Vec::new(),
+                    v => vec![v],
+                };
+                Ok(f(args, &*env))
+            }
         }
     }
 }
@@ -67,19 +67,7 @@ impl Debug for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Function::Builtin(func) => write!(f, "built-in {:p}", func),
-            Function::Implemented(args, _, _) => {
-                write!(f, "fn(")?;
-                let mut first = true;
-                for (arg, _) in args {
-                    if first {
-                        first = false;
-                    } else {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", arg)?;
-                }
-                write!(f, ") {{...}}")
-            }
+            Function::Implemented(args, _, _) => write!(f, "fn{args:#} {{...}}")
         }
     }
 }
@@ -138,36 +126,36 @@ impl<'s> Enviroment<'s> {
             table: SymbolTable::new(),
         };
         #[inline]
-        fn c(f: fn(Vec<Value>, &Enviroment) -> Value) -> Value {
-            Value::Function(Function::Builtin(f))
+        fn c(f: fn(Vec<Value>, &Enviroment) -> Value) -> Function {
+            Function::Builtin(f)
         }
 
-        env.add_const("id", c(id));
-        env.add_const("add", c(add));
-        env.add_const("sub", c(sub));
-        env.add_const("mul", c(mul));
-        env.add_const("div", c(div));
-        env.add_const("rem", c(rem));
-        env.add_const("shl", c(shl));
-        env.add_const("shr", c(shr));
-        env.add_const("bitand", c(bitand));
-        env.add_const("xor", c(xor));
-        env.add_const("bitor", c(bitor));
-        env.add_const("eq", c(eq));
-        env.add_const("neq", c(neq));
-        env.add_const("gt", c(gt));
-        env.add_const("gte", c(gte));
-        env.add_const("lt", c(lt));
-        env.add_const("lte", c(lte));
-        env.add_const("neg", c(neg));
-        env.add_const("not", c(not));
-        env.add_const("concat", c(concat));
-        env.add_const("pow", c(pow));
-        env.add_const("print", c(print));
-        env.add_const("println", c(println));
-        env.add_const("show", c(show));
-        env.add_const("read", c(read));
-        env.add_const("int", c(int));
+        env.add_fun("id", c(id));
+        env.add_fun("add", c(add));
+        env.add_fun("sub", c(sub));
+        env.add_fun("mul", c(mul));
+        env.add_fun("div", c(div));
+        env.add_fun("rem", c(rem));
+        env.add_fun("shl", c(shl));
+        env.add_fun("shr", c(shr));
+        env.add_fun("bitand", c(bitand));
+        env.add_fun("xor", c(xor));
+        env.add_fun("bitor", c(bitor));
+        env.add_fun("eq", c(eq));
+        env.add_fun("neq", c(neq));
+        env.add_fun("gt", c(gt));
+        env.add_fun("gte", c(gte));
+        env.add_fun("lt", c(lt));
+        env.add_fun("lte", c(lte));
+        env.add_fun("neg", c(neg));
+        env.add_fun("not", c(not));
+        env.add_fun("concat", c(concat));
+        env.add_fun("pow", c(pow));
+        env.add_fun("print", c(print));
+        env.add_fun("println", c(println));
+        env.add_fun("show", c(show));
+        env.add_fun("read", c(read));
+        env.add_fun("int", c(int));
 
         env
     }
@@ -220,15 +208,30 @@ impl<'s> Enviroment<'s> {
         self.stack.push(v);
         i
     }
-    fn add_const(&mut self, s: impl ToString, v: Value) {
-        let i = self.add(v);
+    fn bind(&mut self, b: Binding, mutable: bool, v: Value) {
+        match (b, v) {
+            (Binding::Unit, Value::Primitive(Unit)) => (),
+            (Binding::Unit, v) => panic!("{v:?} was not a unit"),
+            (Binding::Name(s), v) => {
+                let i = self.add(v);
+
+                self.table.insert(s, (mutable, i));
+            }
+            (Binding::Tuple(names), Value::Tuple(values)) => {
+                if names.len() != values.len() {
+                    panic!("non-matching tuple sizes to destructure")
+                }
+                for (name, value) in names.into_iter().zip(values) {
+                    self.bind(name, mutable, value);
+                }
+            }
+            (Binding::Tuple(_), v) => panic!("{v:?} was not a tuple"),
+        }
+    }
+    fn add_fun(&mut self, s: impl ToString, f: Function) {
+        let i = self.add(Value::Function(f));
 
         self.table.insert(s.to_string(), (false, i));
-    }
-    fn add_var(&mut self, s: impl ToString, v: Value) {
-        let i = self.add(v);
-
-        self.table.insert(s.to_string(), (true, i));
     }
     fn scope<'a>(&'a mut self) -> Enviroment<'a> {
         Enviroment {
@@ -334,16 +337,16 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
 
         match statement {
             Statement::DiscardExpr(expr) => eval = eval!(expr, env),
-            Statement::ConstAssign(_, ident, t, expr) => {
+            Statement::ConstAssign(_, b, t, expr) => {
                 let val = eval!(expr, env);
-                env.add_const(ident, val);
+                env.bind(b, false, val);
                 if !t.is_inferred() {
                     eprintln!("warning: type annotations are ignored in interpreter mode")
                 }
             }
-            Statement::VarAssign(_, ident, t, expr) => {
+            Statement::VarAssign(_, b, t, expr) => {
                 let val = eval!(expr, env);
-                env.add_var(ident, val);
+                env.bind(b, true, val);
                 if !t.is_inferred() {
                     eprintln!("warning: type annotations are ignored in interpreter mode")
                 }
@@ -352,9 +355,9 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Enviroment<
                 let val = eval!(expr, env);
                 *reassign!(lhs, env) = val;
             }
-            Statement::Function(_fl, func_name, arg_names, body) => {
+            Statement::Function(_fl, func_name, arg_names, _arg_type, body) => {
                 let i = env.get_next_index();
-                env.add_const(func_name, Value::Primitive(LNone));
+                env.add_fun(func_name, Function::Builtin(fns::dummy));
 
                 env.stack[i] = Value::Function(Function::Implemented(arg_names, env.collapse_symbol_table(), match body {
                     Expr::Block(_fl, statements) => statements,
