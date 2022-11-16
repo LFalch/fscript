@@ -1,9 +1,7 @@
 use std::ops::{Add, Sub, Mul, Div, Rem, Shl, Shr, BitAnd, BitOr, BitXor, Not, Neg};
 use std::cmp::{PartialEq, PartialOrd};
 
-use crate::type_check::ast::Expr;
-
-use super::{Value, Environment, eval_expr};
+use super::{Value, Environment};
 
 macro_rules! binop {
     (
@@ -103,7 +101,7 @@ use std::io::stdin;
 pub(super) fn read(_v: Value, env: &mut Environment) -> Value {
     let mut s = String::new();
     stdin().read_line(&mut s).unwrap();
-    eval_expr(Expr::String(s), env).unwrap()
+    env.new_string(&s)
 }
 
 pub(super) fn int(v: Value, env: &mut Environment) -> Value {
@@ -146,8 +144,7 @@ macro_rules! show {
             let p = unsafe { arg.pointer };
             let i = unsafe { env.index(p).$t };
 
-
-            eval_expr(Expr::String(format!("{i}")), env).unwrap()
+            env.new_string(&format!("{i}"))
         })*
     };
 }
@@ -156,7 +153,7 @@ show!{
     showi, int;
     showu, uint;
     showf, float;
-    shown, boolean;
+    showb, boolean;
 }
 
 pub(super) fn concats(v: Value, env: &mut Environment) -> Value {
@@ -172,8 +169,7 @@ pub(super) fn concats(v: Value, env: &mut Environment) -> Value {
         s.push(unsafe { env.index(s2.1+i as usize).c });
     }
 
-
-    eval_expr(Expr::String(s), env).unwrap()
+    env.new_string(&s)
 }
 
 pub(super) fn concata(v: Value, env: &mut Environment) -> Value {
@@ -189,10 +185,5 @@ pub(super) fn concata(v: Value, env: &mut Environment) -> Value {
         vec.push(*env.index(a2.1+i as usize));
     }
 
-    let pointer = env.get_next_index();
-    let length = vec.len() as u64;
-    for val in vec {
-        env.add(val);
-    }
-    Value { fat_pointer: (length, pointer) }
+    env.new_array(&vec)
 }

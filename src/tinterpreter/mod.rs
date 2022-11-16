@@ -27,9 +27,10 @@ impl Debug for Value {
 
 pub fn run(stmnts: impl IntoIterator<Item=Statement>) -> Option<(Value, Type)> {
     let mut stack = Vec::new();
+    let mut heap = Vec::new();
     let mut text = Vec::new();
 
-    let mut env = Environment::new_standard(&mut stack, &mut text);
+    let mut env = Environment::new_standard(&mut stack, &mut heap, &mut text);
 
     #[cfg(feature = "debug_print_statements")]
     let stmnts = stmnts.into_iter().inspect(|statement| println!("{}", statement));
@@ -53,6 +54,7 @@ impl SymbolTable {
 #[derive(Debug)]
 pub struct Environment<'a> {
     stack: &'a mut Vec<Value>,
+    heap: &'a mut Vec<Value>,
     text: &'a mut Vec<Function>,
     table: SymbolTable,
     parent_stack_length: usize,
@@ -69,14 +71,19 @@ mod fns;
 
 impl<'s> Environment<'s> {
     #[inline(always)]
-    /// Stack will be cleared
-    fn new_standard(stack: &'s mut Vec<Value>, text: &'s mut Vec<Function>) -> Self {
+    /// Inputs will be cleared
+    fn new_standard(stack: &'s mut Vec<Value>, heap: &'s mut Vec<Value>, text: &'s mut Vec<Function>) -> Self {
         use crate::tinterpreter::fns::*;
+
+        stack.clear();
+        text.clear();
+        heap.clear();
 
         let mut env = Environment {
             parent_stack_length: 0,
             table: SymbolTable::new(),
             stack,
+            heap,
             text,
         };
 
@@ -127,9 +134,9 @@ impl<'s> Environment<'s> {
         env.add_fn("concat", Type::Array(Box::new(Type::Int)), Type::Tuple(vec![Type::Array(Box::new(Type::Int)), Type::Array(Box::new(Type::Int))]), Function::Builtin(concata));
         env.add_fn("concat", Type::Array(Box::new(Type::Uint)), Type::Tuple(vec![Type::Array(Box::new(Type::Uint)), Type::Array(Box::new(Type::Uint))]), Function::Builtin(concata));
         env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Int)), Function::Builtin(showi));
-        env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Uint)), Function::Builtin(showi));
-        env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Float)), Function::Builtin(showi));
-        env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Bool)), Function::Builtin(showi));
+        env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Uint)), Function::Builtin(showu));
+        env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Float)), Function::Builtin(showf));
+        env.add_fn("show", Type::String, Type::Reference(Box::new(Type::Bool)), Function::Builtin(showb));
         env.add_fn("print", Type::Unit, Type::String, Function::Builtin(print));
         env.add_fn("println", Type::Unit, Type::String, Function::Builtin(println));
         env.add_fn("read", Type::String, Type::Unit, Function::Builtin(read));
@@ -138,10 +145,10 @@ impl<'s> Environment<'s> {
         env
     }
     fn index(&self, i: usize) -> &Value {
-        &self.stack[i]
+        self.stack.get(i).or_else(|| self.heap.get(i - 0x8000_0000_0000_0000)).expect("Out of bounds")
     }
     fn index_mut(&mut self, i: usize) -> &mut Value {
-        &mut self.stack[i]
+        self.stack.get_mut(i).or_else(|| self.heap.get_mut(i - 0x8000_0000_0000_0000)).expect("Out of bounds")
     }
     fn get_index(&self, s: &str) -> Option<(Type, usize)> {
         let ret = self.table.var_map.get(s);
@@ -173,10 +180,18 @@ impl<'s> Environment<'s> {
     fn get_next_index(&self) -> usize {
         self.stack.len()
     }
+    fn get_next_heap_index(&self) -> usize {
+        0x8000_0000_0000_0000 + self.heap.len()
+    }
 
     fn add(&mut self, v: Value) -> usize {
         let i = self.get_next_index();
         self.stack.push(v);
+        i
+    }
+    fn add_heap(&mut self, v: Value) -> usize {
+        let i = self.get_next_heap_index();
+        self.heap.push(v);
         i
     }
     fn add_fn(&mut self, s: impl ToString, rt: ReturnType, t: Type, f: Function) -> usize {
@@ -198,6 +213,7 @@ impl<'s> Environment<'s> {
         Environment {
             parent_stack_length: self.stack.len(),
             stack: self.stack,
+            heap: self.heap,
             text: self.text,
             table: self.table.clone(),
         }
@@ -207,8 +223,32 @@ impl<'s> Environment<'s> {
             table,
             parent_stack_length: self.stack.len(),
             text: self.text,
+            heap: self.heap,
             stack: self.stack,
         }
+    }
+    fn new_array(&mut self, values: &[Value]) -> Value {
+        let p = self.get_next_heap_index();
+        for value in values {
+            self.add_heap(*value);
+        }
+        Value { fat_pointer: (values.len() as u64, p) }
+    }
+    fn new_tuple(&mut self, values: &[Value]) -> Value {
+        let p = self.get_next_heap_index();
+        for value in values {
+            self.add_heap(*value);
+        }
+        Value { pointer: p }
+    }
+    fn new_string(&mut self, s: &str) -> Value {
+        let p = self.get_next_heap_index();
+        let mut len = 0;
+        for c in s.chars() {
+            self.add_heap(Value { c });
+            len += 1;
+        }
+        Value { fat_pointer: (len, p) }
     }
 }
 
@@ -365,39 +405,27 @@ fn eval_expr(expr: Expr, env: &mut Environment<'_>) -> Option<Value> {
             let pointer = env.add(val);
             Value { pointer }
         }
-        Expr::String(s) => {
-            let pointer = env.get_next_index();
-            let length = s.chars().count() as u64;
-            for c in s.chars() {
-                env.add(Value { c });
-            }
-            Value { fat_pointer: (length, pointer) }
-        }
+        Expr::String(s) => env.new_string(&s),
         Expr::Array(vec) => {
-            let pointer = env.get_next_index();
-            let length = vec.len() as u64;
+            let mut values = Vec::with_capacity(vec.len());
             for e in vec {
-                let val = eval_expr(e, env)?;
-                env.add(val);
+                values.push(eval_expr(e, env)?);
             }
-            Value { fat_pointer: (length, pointer) }
+            env.new_array(&values)
         }
         Expr::Tuple(vec) => {
-            let pointer = env.get_next_index();
+            let mut values = Vec::with_capacity(vec.len());
             for e in vec {
-                let val = eval_expr(e, env)?;
-                env.add(val);
+                values.push(eval_expr(e, env)?);
             }
-            Value { pointer }
+            env.new_tuple(&values)
         }
         Expr::Call(rt, func, arg_expr) => {
             let mut f: Option<Function> = None;
-            for (lt, lrt, lf) in env.get_fn(&func) {
+            for (_lt, lrt, lf) in env.get_fn(&func) {
                 if &rt == lrt {
                     f = Some(lf.clone());
                     break;
-                } else {
-                    eprintln!("Discared {func} {lt} -> {lrt}");
                 }
             }
             let val = eval_expr(*arg_expr, env)?;
