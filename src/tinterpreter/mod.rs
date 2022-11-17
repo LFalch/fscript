@@ -1,4 +1,4 @@
-use std::{fmt::{self, Debug}, collections::HashMap, mem::replace};
+use std::{fmt::{self, Debug, Display}, collections::HashMap, mem::replace};
 
 use crate::type_check::ast::*;
 
@@ -25,7 +25,14 @@ impl Debug for Value {
     }
 }
 
-pub fn run(stmnts: impl IntoIterator<Item=Statement>) -> Option<(Value, Type)> {
+#[derive(Debug)]
+pub struct Return {
+    pub value: Value,
+    pub t: Type,
+    pub display: String,
+}
+
+pub fn run(stmnts: impl IntoIterator<Item=Statement>) -> Option<Return> {
     let mut stack = Vec::new();
     let mut heap = Vec::new();
     let mut text = Vec::new();
@@ -36,6 +43,11 @@ pub fn run(stmnts: impl IntoIterator<Item=Statement>) -> Option<(Value, Type)> {
     let stmnts = stmnts.into_iter().inspect(|statement| println!("{}", statement));
 
     run_statements(stmnts, &mut env)
+        .map(|(value, t)| Return {
+            display: format!("{}", env.display_value(&value, &t)),
+            value,
+            t
+        })
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +153,7 @@ impl<'s> Environment<'s> {
         env.add_fn("println", Type::Unit, Type::String, Function::Builtin(println));
         env.add_fn("read", Type::String, Type::Unit, Function::Builtin(read));
         env.add_fn("int", Type::Int, Type::String, Function::Builtin(int));
+        env.add_fn("vardump", Type::Unit, Type::Unit, Function::Builtin(vardump));
 
         env
     }
@@ -271,6 +284,80 @@ impl<'s> Environment<'s> {
             len += 1;
         }
         Value { fat_pointer: (len, p) }
+    }
+    fn display_value<'a>(&'a self, value: &'a Value, t: &'a Type) -> DisplayValue<'s, 'a> {
+        DisplayValue(self, value, t)
+    }
+}
+
+pub struct DisplayValue<'e: 'a, 'a>(&'a Environment<'e>, &'a Value, &'a Type);
+
+impl Display for DisplayValue<'_, '_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let &DisplayValue(env, val, t) = self;
+
+        unsafe { match t {
+            NamedType::Unit => write!(f, "{:?}", val.unit),
+            NamedType::Bool => write!(f, "{}", val.boolean),
+            NamedType::Uint => write!(f, "{}", val.uint),
+            NamedType::Int => write!(f, "{}", val.int),
+            NamedType::Float => write!(f, "{}", val.float),
+            NamedType::Reference(t) => {
+                let p = val.pointer;
+                let val = env.index(p);
+                write!(f, "&{}", DisplayValue(env, val, t))
+            }
+            NamedType::MutReference(t) => {
+                let p = val.pointer;
+                let val = env.index(p);
+                write!(f, "@{}", DisplayValue(env, val, t))
+            }
+            NamedType::Option(t) => {
+                let p = val.pointer;
+                if p == 0 {
+                    write!(f, "None")
+                } else {
+                    let val = env.index(p);
+                    write!(f, "Some({})", DisplayValue(env, val, t))
+                }
+            }
+            NamedType::Array(t) => {
+                let (len, p) = val.fat_pointer;
+                write!(f, "[")?;
+                for i in 0..len {
+                    let val = env.index(p+i as usize);
+                    write!(f, "{},", DisplayValue(env, val, t))?;
+                }
+                write!(f, "]")
+            }
+            NamedType::String => {
+                let (len, p) = val.fat_pointer;
+                write!(f, "\"")?;
+                for i in 0..len {
+                    match env.index(p+i as usize).c {
+                        '\n' => write!(f, "\\n"),
+                        '\r' => write!(f, "\\r"),
+                        '\t' => write!(f, "\\t"),
+                        c => write!(f, "{c}"),
+                    }?;
+                }
+                write!(f, "\"")
+            }
+            NamedType::Tuple(ts) => {
+                let p = val.pointer;
+                write!(f, "(")?;
+                for (i, t) in ts.iter().enumerate() {
+                    let val = env.index(p + i);
+                    write!(f, "{},", DisplayValue(env, val, t))?;
+                }
+                write!(f, ")")
+            }
+            NamedType::Function(arg_t, rt) => {
+                let p = val.f_pointer;
+                write!(f, "{arg_t} -> {rt}: {:?}", &env.text[p])
+            }
+            _ => write!(f, "???"),
+        } }
     }
 }
 
@@ -413,11 +500,14 @@ fn eval_expr(expr: Expr, env: &mut Environment<'_>) -> Option<Value> {
             let val = eval_expr(*arg_expr, env)?;
             f.expect(&format!("no such function {func}")).call(val, env)?
         }
-        Expr::Ref(expr) | Expr::MutRef(expr) => {
-            let val = eval_expr(*expr, env)?;
-            let pointer = env.add(val);
-            Value { pointer }
-        },
+        Expr::Ref(expr) | Expr::MutRef(expr) => match *expr {
+            Expr::Identifer(s) => Value { pointer: env.get_index(&s).expect("should've been caught by type checker").1 },
+            expr => {
+                let val = eval_expr(expr, env)?;
+                let pointer = env.add(val);
+                Value { pointer }
+            }
+        }
         Expr::Deref(expr) => {
             let pointer = unsafe { eval_expr(*expr, env)?.pointer };
             *env.index(pointer)

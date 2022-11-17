@@ -187,3 +187,13 @@ pub(super) fn concata(v: Value, env: &mut Environment) -> Value {
 
     env.new_array(&vec)
 }
+
+pub(super) fn vardump(_v: Value, env: &mut Environment) -> Value {
+    eprintln!("VARDUMP:");
+    for (name, (t, p)) in &env.table.var_map {
+        eprintln!("{name}: {}", env.display_value(env.index(*p), t));
+    }
+    eprintln!();
+
+    Value{unit:()}
+}

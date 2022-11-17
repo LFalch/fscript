@@ -3,7 +3,7 @@ use std::{fs::File, collections::HashMap};
 use fscript::{
     source::parse_source,
     type_check::type_check,
-    tinterpreter::run,
+    tinterpreter::{run, Return},
     types::{Type, NoTypeVariable},
 };
 
@@ -43,6 +43,7 @@ fn main() {
     functions.insert("show".to_owned(), (Type::Reference(Box::new(Type::type_variable(NoTypeVariable))), Type::String));
     functions.insert("print".to_owned(), (Type::String, Type::Unit));
     functions.insert("println".to_owned(), (Type::String, Type::Unit));
+    functions.insert("vardump".to_owned(), (Type::Unit, Type::Unit));
 
     for arg in std::env::args().skip(1) {
         match &*arg {
@@ -57,9 +58,9 @@ fn main() {
                         println!("{f}:");
 
                         match type_check(code, functions.clone().into_iter()) {
-                            Ok((rt, stmnts)) => {
-                                let (v, t) = run(stmnts).unwrap();
-                                println!("returned {rt}: {v:?} : {t}");
+                            Ok((_rt, stmnts)) => {
+                                let Return { value: _, t: _, display } = run(stmnts).unwrap();
+                                println!("\nReturned: {display}");
                             }
                             Err(e) => eprintln!("Type error {f}{e}"),
                         }
