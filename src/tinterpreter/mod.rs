@@ -209,6 +209,28 @@ impl<'s> Environment<'s> {
 
         self.table.var_map.insert(s.to_string(), (t, i));
     }
+    fn bind(&mut self, b: Binding, t: Type, v: Value) {
+        match b {
+            Binding::Unit => (),
+            Binding::Name(s) => {
+                self.add_var(s, t, v);
+            }
+            Binding::Tuple(bs) => {
+                let ts = match t {
+                    Type::Tuple(ts) => ts,
+                    _ => unreachable!(),
+                };
+
+                let mut p = unsafe { v.pointer };
+
+                for (b, t) in bs.into_iter().zip(ts) {
+                    let v = *self.index(p);
+                    p += 1;
+                    self.bind(b, t, v);
+                }
+            }
+        }
+    }
     fn scope<'a>(&'a mut self) -> Environment<'a> {
         Environment {
             parent_stack_length: self.stack.len(),
@@ -258,26 +280,14 @@ pub enum Function {
     /// Used for built-in functions.
     Builtin(fn(Value, &mut Environment) -> Value),
     /// A function that is defined in fscript
-    Implemented(Vec<(String, Type)>, SymbolTable, Statements),
+    Implemented(Binding, Type, SymbolTable, Statements),
 }
 
 impl Debug for Function {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Function::Builtin(func) => write!(f, "built-in {:p}", func),
-            Function::Implemented(args, _, _) => {
-                write!(f, "fn(")?;
-                let mut first = true;
-                for (arg, _) in args {
-                    if first {
-                        first = false;
-                    } else {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{}", arg)?;
-                }
-                write!(f, ") {{...}}")
-            }
+            Function::Implemented(arg, _, _, _) => write!(f, "fn{arg:#}) {{...}}"),
         }
     }
 }
@@ -285,24 +295,10 @@ impl Debug for Function {
 impl Function {
     fn call(self, arg: Value, env: &mut Environment) -> Option<Value> {
         match self {
-            Function::Implemented(mut arg_names, fn_sym_tab, body) => {
+            Function::Implemented(b, t, fn_sym_tab, body) => {
                 let ref mut env = env.new_env(fn_sym_tab);
 
-                match arg_names.len() {
-                    0 => (),
-                    1 => {
-                        let (s, t) = arg_names.pop().unwrap();
-                        env.add_var(s, t, arg);
-                    }
-                    _ => {
-                        let (size, p) = unsafe { arg.fat_pointer };
-                        assert_eq!(arg_names.len(), size as usize);
-
-                        for (i, (s, t)) in arg_names.into_iter().enumerate() {
-                            env.add_var(s, t, *env.index(p+i));
-                        }
-                    }
-                }
+                env.bind(b, t, arg);
 
                 run_statements(body.clone(), env).map(|(v, _)| v)
             }
@@ -319,33 +315,19 @@ fn run_statements(iter: impl IntoIterator<Item=Statement>, env: &mut Environment
 
         match statement {
             Statement::DiscardExpr(t, expr) => eval = (eval_expr(expr, env)?, t),
-            Statement::ConstAssign(ident, t, expr) => {
-                let val = eval_expr(expr, env)?;
-                env.add_var(ident, t, val);
-            }
-            Statement::VarAssign(ident, t, expr) => {
-                let val = eval_expr(expr, env)?;
-                env.add_var(ident, t, val);
+            Statement::ConstAssign(b, t, expr)
+            | Statement::VarAssign(b, t, expr) => {
+                let v = eval_expr(expr, env)?;
+                env.bind(b, t, v);
             }
             Statement::Reassign(lhs, expr) => {
                 let val = eval_expr(expr, env)?;
                 *reassign(lhs, env)? = val;
             }
-            Statement::Function(func_name, arg_names, rt, body) => {
-                let mut v = Vec::new();
-                for (_, t) in &arg_names {
-                    v.push(t.clone());
-                }
-                let t = if v.is_empty() {
-                    Type::Unit
-                } else if v.len() == 1 {
-                    v.pop().unwrap()
-                } else {
-                    Type::Tuple(v)
-                };
-                let i = env.add_fn(func_name, rt.clone(), t, Function::Builtin(fns::not_yet_implemented));
+            Statement::Function(func_name, arg, t, rt, body) => {
+                let i = env.add_fn(func_name, rt.clone(), t.clone(), Function::Builtin(fns::not_yet_implemented));
 
-                env.text[i] = Function::Implemented(arg_names, env.table.clone(), match body {
+                env.text[i] = Function::Implemented(arg, t, env.table.clone(), match body {
                     Expr::Block(_, statements) => statements,
                     expr => vec![Statement::Return(rt, expr)],
                 });
@@ -420,10 +402,10 @@ fn eval_expr(expr: Expr, env: &mut Environment<'_>) -> Option<Value> {
             }
             env.new_tuple(&values)
         }
-        Expr::Call(rt, func, arg_expr) => {
+        Expr::Call(func, t, rt, arg_expr) => {
             let mut f: Option<Function> = None;
-            for (_lt, lrt, lf) in env.get_fn(&func) {
-                if &rt == lrt {
+            for (lt, lrt, lf) in env.get_fn(&func) {
+                if &rt == lrt && &t == lt {
                     f = Some(lf.clone());
                     break;
                 }

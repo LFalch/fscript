@@ -85,7 +85,8 @@ fn returns_in_expr(expr: &Expr) -> Vec<ReturnType> {
         Some(e) => returns_in_expr(e),
         Array(exprs) => exprs.iter().flat_map(returns_in_expr).collect(),
         Tuple(exprs) => exprs.iter().flat_map(returns_in_expr).collect(),
-        Call(_, _, e) => returns_in_expr(e),
+        // incorrect
+        Call(_, _, _, _) => vec![],
         Ref(e) => returns_in_expr(e),
         MutRef(e) => returns_in_expr(e),
         Deref(e) => returns_in_expr(e),
@@ -325,19 +326,22 @@ pub fn check_exp(expr: UntypedExpr, st: &mut SymbolTable, tv: &mut TypeCollectio
 
             match &*types {
                 [] => return Err(TypeError::NoSuchFunction(fs, name)),
-                [(tv_, _at, rt)] => {
+                [(tv_, at, rt)] => {
                     *tv = tv_.clone();
-                    (rt.clone(), Expr::Call(rt.clone(), name, Box::new(arg)))
+                    (rt.clone(), Expr::Call(name, at.clone(), rt.clone(), Box::new(arg)))
                 }
                 ts => {
                     let mut ret = Vec::new();
-                    for (_tv, _t, rt) in ts {
+                    let mut at = Vec::new();
+                    for (_tv, t, rt) in ts {
                         ret.push(rt.clone());
+                        at.push(t.clone());
                     }
 
                     let rt = tv.next_with(ret);
+                    let t = tv.next_with(at);
 
-                    (rt.clone(), Expr::Call(rt, name, Box::new(arg)))
+                    (rt.clone(), Expr::Call(name, t, rt, Box::new(arg)))
                 }
             }
         }

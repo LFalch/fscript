@@ -23,7 +23,7 @@ pub enum Expr {
     Some(Box<Expr>),
     Array(Vec<Expr>),
     Tuple(Vec<Expr>),
-    Call(ReturnType, String, Box<Expr>),
+    Call(String, Type, ReturnType, Box<Expr>),
     Ref(Box<Expr>),
     MutRef(Box<Expr>),
     Deref(Box<Expr>),
@@ -113,13 +113,13 @@ impl Display for Expr {
                 }
                 write!(f, ")")
             }
-            Call(t, s, exp) => {
+            Call(s, t, rt, exp) => {
                 if let Tuple(_) | Unit = &**exp {
-                    write!(f, "{s}{exp}")?;
+                    write!(f, "{s}(: {t} -> {rt}){exp}")?;
                 } else {
                     write!(f, "{s}({exp})")?;
                 }
-                write!(f, ") : {t}")
+                write!(f, ")")
             }
             Ref(e) => write!(f, "&({e})"),
             MutRef(e) => write!(f, "@({e})"),

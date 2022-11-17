@@ -91,7 +91,8 @@ fn type_specify_expr(expr: &mut Expr, tv: &mut TypeCollection) {
         Deref(e) => type_specify_expr(e, tv),
         Array(es) => es.iter_mut().for_each(|e| type_specify_expr(e, tv)),
         Tuple(es) => es.iter_mut().for_each(|e| type_specify_expr(e, tv)),
-        Call(rt, _, e) => {
+        Call(_, t, rt, e) => {
+            type_specify_type(t, tv);
             type_specify_type(rt, tv);
             type_specify_expr(e, tv);
         }
