@@ -112,7 +112,7 @@ pub(super) fn int(v: Value, env: &mut Environment) -> Value {
         s.push(unsafe { env.index(p+i as usize).c });
     }
 
-    Value { int: s.parse().unwrap() }
+    Value { int: s.trim().parse().unwrap() }
 }
 
 pub(super) fn print(v: Value, env: &mut Environment) -> Value {

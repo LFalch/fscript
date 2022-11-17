@@ -497,8 +497,10 @@ fn eval_expr(expr: Expr, env: &mut Environment<'_>) -> Option<Value> {
                     break;
                 }
             }
+            let f = f.expect(&format!("no such function {func} : {t} -> {rt}"));
+
             let val = eval_expr(*arg_expr, env)?;
-            f.expect(&format!("no such function {func}")).call(val, env)?
+            f.call(val, env)?
         }
         Expr::Ref(expr) | Expr::MutRef(expr) => match *expr {
             Expr::Identifer(s) => Value { pointer: env.get_index(&s).expect("should've been caught by type checker").1 },
